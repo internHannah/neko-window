@@ -18,7 +18,18 @@ npm start
 
 Or double-click `start.cmd` after `npm install`.
 
-The neko appears as a transparent always-on-top overlay. Control it from the **system tray** icon:
+The neko appears as a transparent always-on-top overlay.
+
+### Interact with the cat
+
+| Action | What happens |
+|--------|----------------|
+| Move the mouse | Neko **chases** your cursor (classic oneko style) |
+| Click the neko | **Pet** — happy scratch + wiggle |
+| Drag the neko | Pick it up and place it somewhere else |
+| Elsewhere on screen | Clicks pass through so you can keep working |
+
+Also control it from the **system tray** icon:
 
 | Tray action | What it does |
 |-------------|----------------|
@@ -30,8 +41,8 @@ The neko appears as a transparent always-on-top overlay. Control it from the **s
 ## How it works
 
 - **Electron main** (`electron/main.js`) creates the overlay window, tray menu, reminder timer, and Windows notifications.
-- **Renderer** (`src/neko.js`) runs the walk / idle / sleep / wake / water animation loop using a classic oneko-style sprite sheet tinted pink.
-- Clicks pass through the overlay so you can keep working.
+- **Renderer** (`src/neko.js`) runs chase / idle / sleep / wake / pet / drag / water using a classic oneko-style sprite sheet tinted pink.
+- The overlay is click-through except when the cursor is over the neko (or while dragging).
 
 ## Manual test checklist
 

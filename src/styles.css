@@ -11,14 +11,16 @@ body {
 
 #neko {
   position: fixed;
-  width: 32px;
-  height: 32px;
+  width: 64px;
+  height: 64px;
   left: 48px;
   top: 48px;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: grab;
   image-rendering: pixelated;
   background-image: url("../assets/neko-pink.gif");
   background-repeat: no-repeat;
+  background-size: 512px 256px; /* 8x4 of 64px tiles */
   /* Classic oneko sheet → soft pink companion */
   filter: sepia(1) saturate(4) hue-rotate(295deg) brightness(1.05);
   z-index: 2;
@@ -32,12 +34,33 @@ body {
   animation: bounce 0.4s ease infinite alternate;
 }
 
+#neko.pet-mode {
+  filter: sepia(1) saturate(5) hue-rotate(295deg) brightness(1.15)
+    drop-shadow(0 0 6px #ffb6d9);
+  animation: pet-wiggle 0.18s ease infinite alternate;
+}
+
+#neko.drag-mode {
+  cursor: grabbing;
+  filter: sepia(1) saturate(4.5) hue-rotate(295deg) brightness(1.1);
+  animation: none;
+}
+
 @keyframes bounce {
   from {
     transform: translateY(0);
   }
   to {
     transform: translateY(-6px);
+  }
+}
+
+@keyframes pet-wiggle {
+  from {
+    transform: rotate(-8deg) scale(1.05);
+  }
+  to {
+    transform: rotate(8deg) scale(1.1);
   }
 }
 
