@@ -1,0 +1,62 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+#neko {
+  position: fixed;
+  width: 32px;
+  height: 32px;
+  left: 48px;
+  top: 48px;
+  pointer-events: none;
+  image-rendering: pixelated;
+  background-image: url("../assets/neko-pink.gif");
+  background-repeat: no-repeat;
+  /* Classic oneko sheet → soft pink companion */
+  filter: sepia(1) saturate(4) hue-rotate(295deg) brightness(1.05);
+  z-index: 2;
+  transform-origin: center bottom;
+  transition: filter 0.2s ease;
+}
+
+#neko.water-mode {
+  filter: sepia(1) saturate(5) hue-rotate(295deg) brightness(1.2)
+    drop-shadow(0 0 4px #ff8ec8);
+  animation: bounce 0.4s ease infinite alternate;
+}
+
+@keyframes bounce {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-6px);
+  }
+}
+
+#bubble {
+  position: fixed;
+  z-index: 3;
+  pointer-events: none;
+  padding: 6px 10px;
+  border-radius: 14px;
+  background: rgba(255, 228, 240, 0.95);
+  color: #a13a6b;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgba(161, 58, 107, 0.25);
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+}
+
+#bubble.hidden {
+  display: none;
+}
