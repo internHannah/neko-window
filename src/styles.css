@@ -9,16 +9,10 @@ body {
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
-/* Original CSS Doraemon homage (not official art) */
-#neko.dora {
-  --blue: #2b7fff;
-  --blue-dark: #1a5fd4;
-  --cream: #fff8f0;
-  --red: #e53935;
-  --gold: #ffc107;
+#neko {
   position: fixed;
-  width: 96px;
-  height: 120px;
+  width: 128px;
+  height: 128px;
   left: 48px;
   top: 48px;
   pointer-events: auto;
@@ -27,413 +21,32 @@ body {
   transform-origin: center bottom;
 }
 
-.dora-shadow {
-  position: absolute;
-  left: 18px;
-  bottom: 2px;
-  width: 60px;
-  height: 10px;
-  background: rgba(0, 0, 0, 0.18);
-  border-radius: 50%;
-  filter: blur(2px);
+#neko.flip #sprite {
+  transform: scaleX(-1);
 }
 
-.dora-body {
-  position: absolute;
-  inset: 0;
-  transition: transform 0.12s ease;
-}
-
-.dora-head {
-  position: absolute;
-  left: 8px;
-  top: 0;
-  width: 80px;
-  height: 72px;
-  background: var(--blue);
-  border-radius: 50%;
-  box-shadow: inset -4px -6px 0 rgba(0, 0, 0, 0.08);
-  z-index: 2;
-}
-
-.dora-ear {
-  position: absolute;
-  top: 4px;
-  width: 16px;
-  height: 16px;
-  background: var(--blue);
-  border-radius: 50%;
-}
-
-.dora-ear-l {
-  left: 6px;
-}
-.dora-ear-r {
-  right: 6px;
-}
-
-.dora-face {
-  position: absolute;
-  left: 8px;
-  top: 16px;
-  width: 64px;
-  height: 50px;
-  background: var(--cream);
-  border-radius: 50%;
-}
-
-.dora-eye {
-  position: absolute;
-  top: 6px;
-  width: 18px;
-  height: 22px;
-  background: #fff;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.dora-eye-l {
-  left: 12px;
-}
-.dora-eye-r {
-  right: 12px;
-}
-
-.dora-eye span {
-  position: absolute;
-  left: 6px;
-  top: 8px;
-  width: 7px;
-  height: 9px;
-  background: #222;
-  border-radius: 50%;
-  transition: transform 0.1s ease;
-}
-
-.dora-nose {
-  position: absolute;
-  left: 50%;
-  top: 22px;
-  width: 12px;
-  height: 12px;
-  margin-left: -6px;
-  background: var(--red);
-  border-radius: 50%;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
-}
-
-.dora-nose::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 12px;
-  width: 1px;
-  height: 12px;
-  background: #333;
-  transform: translateX(-50%);
-}
-
-.dora-whisker {
-  position: absolute;
-  height: 1px;
-  width: 18px;
-  background: #333;
-  top: 28px;
-}
-
-.dora-whisker.w1 {
-  left: 2px;
-  top: 26px;
-  transform: rotate(-8deg);
-}
-.dora-whisker.w2 {
-  left: 2px;
-  top: 32px;
-}
-.dora-whisker.w3 {
-  left: 2px;
-  top: 38px;
-  transform: rotate(8deg);
-}
-.dora-whisker.w4 {
-  right: 2px;
-  top: 26px;
-  transform: rotate(8deg);
-}
-.dora-whisker.w5 {
-  right: 2px;
-  top: 32px;
-}
-.dora-whisker.w6 {
-  right: 2px;
-  top: 38px;
-  transform: rotate(-8deg);
-}
-
-.dora-mouth {
-  position: absolute;
-  left: 22px;
-  top: 36px;
-  width: 20px;
-  height: 10px;
-  border: 2px solid #333;
-  border-top: none;
-  border-radius: 0 0 20px 20px;
-}
-
-.dora-torso {
-  position: absolute;
-  left: 18px;
-  top: 58px;
-  width: 60px;
-  height: 54px;
-  background: var(--blue);
-  border-radius: 40% 40% 45% 45%;
-  z-index: 1;
-}
-
-.dora-collar {
-  position: absolute;
-  left: 4px;
-  top: 0;
-  width: 52px;
-  height: 10px;
-  background: var(--red);
-  border-radius: 6px;
-  z-index: 3;
-}
-
-.dora-bell {
-  position: absolute;
-  left: 50%;
-  top: 4px;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
-  background: var(--gold);
-  border-radius: 50%;
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.15);
-}
-
-.dora-bell::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 7px;
-  width: 4px;
-  height: 4px;
-  margin-left: -2px;
-  background: #333;
-  border-radius: 50%;
-}
-
-.dora-belly {
-  position: absolute;
-  left: 10px;
-  top: 12px;
-  width: 40px;
-  height: 34px;
-  background: var(--cream);
-  border-radius: 50%;
-}
-
-.dora-pocket {
-  position: absolute;
-  left: 8px;
-  top: 12px;
-  width: 24px;
-  height: 16px;
-  border: 2px solid #333;
-  border-top: none;
-  border-radius: 0 0 14px 14px;
-  background: transparent;
-}
-
-.dora-arm {
-  position: absolute;
-  top: 16px;
-  width: 16px;
-  height: 16px;
-  background: var(--cream);
-  border-radius: 50%;
-  border: 3px solid var(--blue);
-  box-sizing: border-box;
-}
-
-.dora-arm-l {
-  left: -10px;
-}
-.dora-arm-r {
-  right: -10px;
-}
-
-.dora-foot {
-  position: absolute;
-  bottom: -6px;
-  width: 22px;
-  height: 12px;
-  background: var(--cream);
-  border-radius: 12px;
-}
-
-.dora-foot-l {
-  left: 6px;
-}
-.dora-foot-r {
-  right: 6px;
-}
-
-.dora-zzz {
-  display: none;
-  position: absolute;
-  right: 0;
-  top: 8px;
-  color: #5b8def;
-  font-weight: 800;
-  font-size: 18px;
-  text-shadow: 0 1px 0 #fff;
-}
-
-/* Facing: look with pupils + slight lean */
-.dora.face-e .dora-eye span {
-  transform: translate(3px, 0);
-}
-.dora.face-w .dora-eye span {
-  transform: translate(-3px, 0);
-}
-.dora.face-n .dora-eye span {
-  transform: translate(0, -3px);
-}
-.dora.face-s .dora-eye span {
-  transform: translate(0, 2px);
-}
-.dora.face-ne .dora-eye span {
-  transform: translate(2px, -2px);
-}
-.dora.face-nw .dora-eye span {
-  transform: translate(-2px, -2px);
-}
-.dora.face-se .dora-eye span {
-  transform: translate(2px, 2px);
-}
-.dora.face-sw .dora-eye span {
-  transform: translate(-2px, 2px);
-}
-
-.dora.face-e .dora-body {
-  transform: rotate(4deg);
-}
-.dora.face-w .dora-body {
-  transform: rotate(-4deg);
-}
-
-/* Walk bob while chasing */
-.dora.chasing .dora-body {
-  animation: dora-bob 0.28s ease infinite alternate;
-}
-.dora.chasing .dora-arm-l {
-  animation: dora-wave-l 0.28s ease infinite alternate;
-}
-.dora.chasing .dora-arm-r {
-  animation: dora-wave-r 0.28s ease infinite alternate;
-}
-
-.dora.sleeping .dora-eye span {
-  height: 2px;
-  top: 12px;
-  border-radius: 2px;
-  background: #444;
-}
-.dora.sleeping .dora-mouth {
-  height: 4px;
-  border-radius: 4px;
-}
-.dora.sleeping .dora-zzz {
+#sprite {
+  width: 128px;
+  height: 128px;
+  image-rendering: auto;
+  pointer-events: none;
   display: block;
-  animation: zzz 1s ease infinite;
-}
-.dora.sleeping .dora-body {
-  transform: rotate(-6deg) translateY(4px);
-}
-
-.dora.alert .dora-eye span {
-  transform: scale(1.15);
-}
-.dora.alert .dora-body {
-  animation: dora-surprise 0.25s ease;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 #neko.water-mode {
+  filter: drop-shadow(0 0 8px #7eb6ff);
   animation: bounce 0.4s ease infinite alternate;
-  filter: drop-shadow(0 0 6px #7eb6ff);
 }
 
 #neko.pet-mode {
-  animation: pet-wiggle 0.18s ease infinite alternate;
   filter: drop-shadow(0 0 8px #ffd54f);
-}
-
-#neko.pet-mode .dora-arm-l,
-#neko.pet-mode .dora-arm-r {
-  animation: dora-happy-arms 0.2s ease infinite alternate;
 }
 
 #neko.drag-mode {
   cursor: grabbing;
-  animation: none;
-  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.25));
-}
-
-#neko.drag-mode .dora-body {
-  transform: scale(1.05) rotate(-3deg);
-}
-
-@keyframes dora-bob {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-5px);
-  }
-}
-
-@keyframes dora-wave-l {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(-25deg);
-  }
-}
-
-@keyframes dora-wave-r {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(25deg);
-  }
-}
-
-@keyframes dora-happy-arms {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-4px);
-  }
-}
-
-@keyframes dora-surprise {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.08);
-  }
-  100% {
-    transform: scale(1);
-  }
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.28));
 }
 
 @keyframes bounce {
@@ -442,26 +55,6 @@ body {
   }
   to {
     transform: translateY(-8px);
-  }
-}
-
-@keyframes pet-wiggle {
-  from {
-    transform: rotate(-6deg) scale(1.02);
-  }
-  to {
-    transform: rotate(6deg) scale(1.06);
-  }
-}
-
-@keyframes zzz {
-  0% {
-    opacity: 0.4;
-    transform: translate(0, 0);
-  }
-  100% {
-    opacity: 1;
-    transform: translate(4px, -8px);
   }
 }
 

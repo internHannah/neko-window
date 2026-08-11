@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 .tools/
+.tmp-doraemon-ref/
 *.log
 .DS_Store
 Thumbs.db

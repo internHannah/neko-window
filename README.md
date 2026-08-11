@@ -1,8 +1,6 @@
 # Doraemon Desktop (branch: `doraemon`)
 
-A desktop companion inspired by Doraemon — original CSS art (not official assets) — that chases your cursor, naps, can be petted/dragged, and reminds you to drink water.
-
-> Fan-style original drawing. Doraemon is a trademark of its rights holders; this is an unofficial homage.
+Shimeji-style Doraemon desktop companion: walks, climbs walls/ceilings, falls, can be petted/dragged, and reminds you to drink water.
 
 ## Setup
 
@@ -17,9 +15,15 @@ Or use `start.cmd`.
 
 | Action | What happens |
 |--------|----------------|
-| Move the mouse | Doraemon chases your cursor |
-| Click | Pet — happy wiggle |
-| Drag | Pick up and place |
-| Tray icon | Pause / Drink now / Quit |
+| Autonomously | Walk, run, sit, sleep, climb walls, hang on ceiling, fall |
+| Click | Pet |
+| Drag | Pick up (throw/fall on release) |
+| Tray | Pause / Drink now / Quit |
 
-Pink neko lives on `main`; this Doraemon look is on the `doraemon` branch.
+### Credits
+
+- Behavior inspired by [AlleyBo55/doraemon](https://github.com/AlleyBo55/doraemon) (MIT)
+- Sprites from **Cachomon** — [Doraemon Shimeji FREE](https://www.deviantart.com/cachomon/art/Doraemon-Shimeji-FREE-505596307)
+- Doraemon © Fujiko F. Fujio / Shogakukan — unofficial fan project
+
+Pink neko remains on `main`.

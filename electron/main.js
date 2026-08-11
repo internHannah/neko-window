@@ -20,13 +20,17 @@ let paused = false;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
 let cursorPollTimer = null;
-let nekoBounds = { x: 0, y: 0, w: 96, h: 120 };
+let nekoBounds = { x: 0, y: 0, w: 128, h: 128 };
 let forceInteractive = false;
 let ignoringMouse = true;
 
 function createTrayIcon() {
-  const iconPath = path.join(__dirname, "..", "assets", "tray.png");
+  const iconPath = path.join(__dirname, "..", "assets", "dora-sprites", "icon.png");
   let icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    const fallback = path.join(__dirname, "..", "assets", "tray.png");
+    icon = nativeImage.createFromPath(fallback);
+  }
   if (icon.isEmpty()) {
     // Fallback: solid pink square so the tray is never invisible
     const size = 32;
