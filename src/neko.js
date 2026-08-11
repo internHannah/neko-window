@@ -1,57 +1,12 @@
 (() => {
-  const SPRITE = 32;
-  const DISPLAY = 64; // 2x for easier petting
-  const SPEED = 12;
+  const WIDTH = 96;
+  const HEIGHT = 120;
+  const HALF_W = WIDTH / 2;
+  const HALF_H = HEIGHT / 2;
+  const SPEED = 11;
   const TICK_MS = 100;
-  const CATCH_DISTANCE = 56;
+  const CATCH_DISTANCE = 72;
   const DRAG_THRESHOLD = 5;
-
-  const spriteSets = {
-    idle: [[-3, -3]],
-    alert: [[-7, -3]],
-    scratchSelf: [
-      [-5, 0],
-      [-6, 0],
-      [-7, 0],
-    ],
-    tired: [[-3, -2]],
-    sleeping: [
-      [-2, 0],
-      [-2, -1],
-    ],
-    N: [
-      [-1, -2],
-      [-1, -3],
-    ],
-    NE: [
-      [0, -2],
-      [0, -3],
-    ],
-    E: [
-      [-3, 0],
-      [-3, -1],
-    ],
-    SE: [
-      [-5, -1],
-      [-5, -2],
-    ],
-    S: [
-      [-6, -3],
-      [-7, -2],
-    ],
-    SW: [
-      [-5, -3],
-      [-6, -1],
-    ],
-    W: [
-      [-4, -2],
-      [-4, -3],
-    ],
-    NW: [
-      [-1, 0],
-      [-1, -1],
-    ],
-  };
 
   /** @type {'idle' | 'chase' | 'sleep' | 'wake' | 'water' | 'pet' | 'drag'} */
   let state = "idle";
@@ -62,10 +17,10 @@
   let waterFramesLeft = 0;
   let petFramesLeft = 0;
 
-  let nekoX = 120;
-  let nekoY = 120;
-  let mouseX = 120;
-  let mouseY = 120;
+  let nekoX = 140;
+  let nekoY = 140;
+  let mouseX = 140;
+  let mouseY = 140;
 
   let pointerDown = false;
   let didDrag = false;
@@ -76,42 +31,68 @@
 
   const nekoEl = document.getElementById("neko");
   const bubbleEl = document.getElementById("bubble");
-  const half = DISPLAY / 2;
+  const faceClasses = [
+    "face-n",
+    "face-ne",
+    "face-e",
+    "face-se",
+    "face-s",
+    "face-sw",
+    "face-w",
+    "face-nw",
+  ];
+  const poseClasses = ["chasing", "sleeping", "alert"];
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
 
-  function setSprite(name, frame) {
-    const frames = spriteSets[name];
-    if (!frames) return;
-    const sprite = frames[frame % frames.length];
-    const scale = DISPLAY / SPRITE;
-    nekoEl.style.backgroundPosition = `${sprite[0] * SPRITE * scale}px ${
-      sprite[1] * SPRITE * scale
-    }px`;
+  function clearPose() {
+    nekoEl.classList.remove(...poseClasses);
+  }
+
+  function setFace(dir) {
+    const map = {
+      N: "face-n",
+      NE: "face-ne",
+      E: "face-e",
+      SE: "face-se",
+      S: "face-s",
+      SW: "face-sw",
+      W: "face-w",
+      NW: "face-nw",
+      idle: "face-s",
+      alert: "face-s",
+    };
+    nekoEl.classList.remove(...faceClasses);
+    nekoEl.classList.add(map[dir] || "face-s");
+  }
+
+  function setPose(pose) {
+    clearPose();
+    if (pose) nekoEl.classList.add(pose);
   }
 
   function reportBounds() {
     if (window.nekoBridge) {
       window.nekoBridge.reportBounds({
-        x: nekoX - half,
-        y: nekoY - half,
-        w: DISPLAY,
-        h: DISPLAY,
+        x: nekoX - HALF_W,
+        y: nekoY - HALF_H,
+        w: WIDTH,
+        h: HEIGHT,
       });
     }
   }
 
   function placeNeko() {
-    nekoEl.style.left = `${nekoX - half}px`;
-    nekoEl.style.top = `${nekoY - half}px`;
+    nekoEl.style.left = `${nekoX - HALF_W}px`;
+    nekoEl.style.top = `${nekoY - HALF_H}px`;
     reportBounds();
   }
 
   function placeBubble() {
     bubbleEl.style.left = `${nekoX}px`;
-    bubbleEl.style.top = `${nekoY - half - 8}px`;
+    bubbleEl.style.top = `${nekoY - HALF_H - 8}px`;
   }
 
   function setInteractive(active) {
@@ -131,10 +112,10 @@
 
   function isOverNeko(x, y) {
     return (
-      x >= nekoX - half - 10 &&
-      x <= nekoX + half + 10 &&
-      y >= nekoY - half - 10 &&
-      y <= nekoY + half + 10
+      x >= nekoX - HALF_W - 8 &&
+      x <= nekoX + HALF_W + 8 &&
+      y >= nekoY - HALF_H - 8 &&
+      y <= nekoY + HALF_H + 8
     );
   }
 
@@ -142,6 +123,8 @@
     state = "idle";
     stateFrame = 0;
     idleTime = 0;
+    setPose(null);
+    setFace("idle");
     nekoEl.classList.remove("pet-mode", "drag-mode");
   }
 
@@ -149,23 +132,27 @@
     state = "chase";
     stateFrame = 0;
     idleTime = 0;
+    setPose("chasing");
     nekoEl.classList.remove("pet-mode", "drag-mode");
   }
 
   function enterSleep() {
     state = "sleep";
     stateFrame = 0;
+    setPose("sleeping");
   }
 
   function enterWake() {
     state = "wake";
     stateFrame = 0;
+    setPose("alert");
   }
 
   function enterWater() {
     state = "water";
     stateFrame = 0;
     waterFramesLeft = 50;
+    setPose("alert");
     nekoEl.classList.remove("pet-mode", "drag-mode");
     nekoEl.classList.add("water-mode");
     bubbleEl.classList.remove("hidden");
@@ -180,8 +167,10 @@
   function enterPet() {
     state = "pet";
     stateFrame = 0;
-    petFramesLeft = 20;
+    petFramesLeft = 22;
     idleTime = 0;
+    setPose(null);
+    setFace("idle");
     nekoEl.classList.add("pet-mode");
     nekoEl.classList.remove("drag-mode");
   }
@@ -191,6 +180,7 @@
     stateFrame = 0;
     idleTime = 0;
     leaveWaterVisual();
+    setPose("alert");
     nekoEl.classList.remove("pet-mode");
     nekoEl.classList.add("drag-mode");
     setInteractive(true);
@@ -204,7 +194,7 @@
 
     if (distance >= CATCH_DISTANCE) {
       if (idleTime > 1) {
-        setSprite("alert", 0);
+        setPose("alert");
         idleTime = Math.min(idleTime, 7);
         idleTime -= 1;
         if (idleTime <= 1) enterChase();
@@ -214,14 +204,8 @@
       return;
     }
 
-    if (idleTime > 20 && Math.floor(Math.random() * 80) === 0) {
-      setSprite("scratchSelf", stateFrame);
-      stateFrame += 1;
-      if (stateFrame > 9) stateFrame = 0;
-      return;
-    }
-
-    setSprite("idle", 0);
+    setPose(null);
+    setFace("idle");
     if (idleTime > 120 + Math.floor(Math.random() * 40)) {
       enterSleep();
     }
@@ -238,13 +222,13 @@
     }
 
     const dir = directionToward(dx, dy, distance);
-    if (dir === "idle") setSprite("idle", 0);
-    else setSprite(dir, frameCount);
+    setPose("chasing");
+    setFace(dir);
 
     nekoX -= (dx / distance) * SPEED;
     nekoY -= (dy / distance) * SPEED;
-    nekoX = clamp(nekoX, half, window.innerWidth - half);
-    nekoY = clamp(nekoY, half, window.innerHeight - half);
+    nekoX = clamp(nekoX, HALF_W, window.innerWidth - HALF_W);
+    nekoY = clamp(nekoY, HALF_H, window.innerHeight - HALF_H);
     placeNeko();
   }
 
@@ -253,20 +237,19 @@
       enterWake();
       return;
     }
-    if (stateFrame < 8) setSprite("tired", 0);
-    else setSprite("sleeping", Math.floor(stateFrame / 4));
+    setPose("sleeping");
     stateFrame += 1;
     if (stateFrame > 160) enterWake();
   }
 
   function tickWake() {
-    setSprite("alert", 0);
+    setPose("alert");
     stateFrame += 1;
     if (stateFrame > 8) enterChase();
   }
 
   function tickWater() {
-    setSprite("alert", 0);
+    setPose("alert");
     placeBubble();
     waterFramesLeft -= 1;
     stateFrame += 1;
@@ -277,7 +260,6 @@
   }
 
   function tickPet() {
-    setSprite("scratchSelf", Math.floor(stateFrame / 2));
     stateFrame += 1;
     petFramesLeft -= 1;
     if (petFramesLeft <= 0) {
@@ -287,12 +269,12 @@
   }
 
   function tickDrag() {
-    setSprite("alert", 0);
+    setPose("alert");
   }
 
   function frame() {
     if (paused && state !== "water" && state !== "drag" && state !== "pet") {
-      setSprite("sleeping", Math.floor(frameCount / 8));
+      setPose("sleeping");
       return;
     }
 
@@ -325,7 +307,6 @@
   }
 
   function onPointerMove(event) {
-    // Prefer OS cursor from main; still track local events while interactive
     if (pointerDown || state === "drag" || !window.nekoBridge) {
       mouseX = event.clientX;
       mouseY = event.clientY;
@@ -341,8 +322,8 @@
     if (state === "drag" || (pointerDown && didDrag)) {
       mouseX = event.clientX;
       mouseY = event.clientY;
-      nekoX = clamp(event.clientX - dragOffsetX, half, window.innerWidth - half);
-      nekoY = clamp(event.clientY - dragOffsetY, half, window.innerHeight - half);
+      nekoX = clamp(event.clientX - dragOffsetX, HALF_W, window.innerWidth - HALF_W);
+      nekoY = clamp(event.clientY - dragOffsetY, HALF_H, window.innerHeight - HALF_H);
       placeNeko();
     }
   }
@@ -394,8 +375,8 @@
   });
 
   window.addEventListener("resize", () => {
-    nekoX = clamp(nekoX, half, window.innerWidth - half);
-    nekoY = clamp(nekoY, half, window.innerHeight - half);
+    nekoX = clamp(nekoX, HALF_W, window.innerWidth - HALF_W);
+    nekoY = clamp(nekoY, HALF_H, window.innerHeight - HALF_H);
     placeNeko();
   });
 
@@ -414,6 +395,7 @@
         setInteractive(false);
         state = "sleep";
         stateFrame = 8;
+        setPose("sleeping");
       } else {
         enterWake();
       }
@@ -427,7 +409,7 @@
   }
 
   placeNeko();
-  setSprite("idle", 0);
+  enterIdle();
 
   let last = 0;
   function loop(timestamp) {

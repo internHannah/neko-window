@@ -20,7 +20,7 @@ let paused = false;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
 let cursorPollTimer = null;
-let nekoBounds = { x: 0, y: 0, w: 64, h: 64 };
+let nekoBounds = { x: 0, y: 0, w: 96, h: 120 };
 let forceInteractive = false;
 let ignoringMouse = true;
 
@@ -32,9 +32,9 @@ function createTrayIcon() {
     const size = 32;
     const buf = Buffer.alloc(size * size * 4);
     for (let i = 0; i < size * size; i++) {
-      buf[i * 4] = 255;
-      buf[i * 4 + 1] = 105;
-      buf[i * 4 + 2] = 180;
+      buf[i * 4] = 43;
+      buf[i * 4 + 1] = 127;
+      buf[i * 4 + 2] = 255;
       buf[i * 4 + 3] = 255;
     }
     icon = nativeImage.createFromBuffer(buf, { width: size, height: size });
@@ -137,7 +137,7 @@ function stopCursorPoll() {
 function showWaterNotification() {
   if (!Notification.isSupported()) return;
   const notification = new Notification({
-    title: "Pink Neko",
+    title: "Doraemon",
     body: "Time to drink water!",
     silent: false,
   });
@@ -179,7 +179,7 @@ function buildTrayMenu() {
 
   const intervalMinutes = Math.round(reminderIntervalMs / 60000);
   const template = [
-    { label: "Pink Neko", enabled: false },
+    { label: "Doraemon", enabled: false },
     { type: "separator" },
     {
       label: paused ? "Resume neko" : "Pause neko",
@@ -214,8 +214,8 @@ function buildTrayMenu() {
   tray.setContextMenu(trayMenu);
   tray.setToolTip(
     paused
-      ? "Pink Neko (paused) — click for menu"
-      : `Pink Neko · water every ${intervalMinutes}m — click for menu`
+      ? "Doraemon (paused) — click for menu"
+      : `Doraemon · water every ${intervalMinutes}m — click for menu`
   );
 }
 
