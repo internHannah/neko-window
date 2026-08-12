@@ -23,27 +23,36 @@ let cursorPollTimer = null;
 let nekoBounds = { x: 0, y: 0, w: 128, h: 128 };
 let forceInteractive = false;
 let ignoringMouse = true;
+let lastCursor = { x: Number.NaN, y: Number.NaN };
 
 function createTrayIcon() {
-  const iconPath = path.join(__dirname, "..", "assets", "dora-sprites", "icon.png");
-  let icon = nativeImage.createFromPath(iconPath);
-  if (icon.isEmpty()) {
-    const fallback = path.join(__dirname, "..", "assets", "tray.png");
-    icon = nativeImage.createFromPath(fallback);
+  const candidates = [
+    path.join(__dirname, "..", "assets", "dora-sprites", "icon.png"),
+    path.join(__dirname, "..", "assets", "tray.png"),
+  ];
+
+  for (const iconPath of candidates) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) return icon.resize({ width: 16, height: 16 });
   }
-  if (icon.isEmpty()) {
-    // Fallback: solid pink square so the tray is never invisible
-    const size = 32;
-    const buf = Buffer.alloc(size * size * 4);
-    for (let i = 0; i < size * size; i++) {
-      buf[i * 4] = 43;
-      buf[i * 4 + 1] = 127;
-      buf[i * 4 + 2] = 255;
-      buf[i * 4 + 3] = 255;
-    }
-    icon = nativeImage.createFromBuffer(buf, { width: size, height: size });
+
+  const size = 32;
+  const buf = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    buf[i * 4] = 43;
+    buf[i * 4 + 1] = 127;
+    buf[i * 4 + 2] = 255;
+    buf[i * 4 + 3] = 255;
   }
-  return icon.resize({ width: 16, height: 16 });
+  return nativeImage
+    .createFromBuffer(buf, { width: size, height: size })
+    .resize({ width: 16, height: 16 });
+}
+
+function fitWindowToDisplay() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const { x, y, width, height } = screen.getPrimaryDisplay().bounds;
+  mainWindow.setBounds({ x, y, width, height });
 }
 
 function createWindow() {
@@ -70,6 +79,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -97,7 +107,6 @@ function setMouseIgnore(ignore) {
   if (ignore) {
     mainWindow.setIgnoreMouseEvents(true, { forward: true });
   } else {
-    // Fully capture mouse so pet/drag clicks register
     mainWindow.setIgnoreMouseEvents(false);
   }
 }
@@ -120,10 +129,12 @@ function pollCursor() {
   const localX = point.x - winX;
   const localY = point.y - winY;
 
-  sendToNeko("neko:cursor", { x: localX, y: localY });
+  if (localX !== lastCursor.x || localY !== lastCursor.y) {
+    lastCursor = { x: localX, y: localY };
+    sendToNeko("neko:cursor", lastCursor);
+  }
 
-  const overNeko = pointInNeko(localX, localY);
-  setMouseIgnore(!(forceInteractive || overNeko));
+  setMouseIgnore(!(forceInteractive || pointInNeko(localX, localY)));
 }
 
 function startCursorPoll() {
@@ -140,12 +151,11 @@ function stopCursorPoll() {
 
 function showWaterNotification() {
   if (!Notification.isSupported()) return;
-  const notification = new Notification({
+  new Notification({
     title: "Doraemon",
     body: "Time to drink water!",
     silent: false,
-  });
-  notification.show();
+  }).show();
 }
 
 function triggerWaterReminder() {
@@ -186,7 +196,7 @@ function buildTrayMenu() {
     { label: "Doraemon", enabled: false },
     { type: "separator" },
     {
-      label: paused ? "Resume neko" : "Pause neko",
+      label: paused ? "Resume" : "Pause",
       click: () => setPaused(!paused),
     },
     {
@@ -206,11 +216,7 @@ function buildTrayMenu() {
     { type: "separator" },
     {
       label: "Quit",
-      click: () => {
-        clearReminderTimer();
-        stopCursorPoll();
-        app.quit();
-      },
+      click: () => app.quit(),
     },
   ];
 
@@ -227,7 +233,6 @@ function createTray() {
   tray = new Tray(createTrayIcon());
   buildTrayMenu();
 
-  // Windows: left-click often does nothing unless we open the menu ourselves
   const popup = () => {
     if (trayMenu) tray.popUpContextMenu(trayMenu);
   };
@@ -236,17 +241,21 @@ function createTray() {
   tray.on("double-click", () => triggerWaterReminder());
 }
 
-app.setAppUserModelId("com.neko-window.pink-neko");
-
-app.whenReady().then(() => {
-  createWindow();
-  createTray();
-  scheduleReminders();
-  startCursorPoll();
-
+function registerIpc() {
   ipcMain.on("neko:bounds", (_event, bounds) => {
-    if (bounds && typeof bounds.x === "number") {
-      nekoBounds = bounds;
+    if (
+      bounds &&
+      Number.isFinite(bounds.x) &&
+      Number.isFinite(bounds.y) &&
+      Number.isFinite(bounds.w) &&
+      Number.isFinite(bounds.h)
+    ) {
+      nekoBounds = {
+        x: bounds.x,
+        y: bounds.y,
+        w: Math.max(1, bounds.w),
+        h: Math.max(1, bounds.h),
+      };
     }
   });
 
@@ -256,16 +265,45 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on("neko:set-click-through", (_event, ignore) => {
-    // Kept for compatibility; main poll owns click-through now
     if (!forceInteractive) setMouseIgnore(!!ignore);
   });
-});
+}
 
-app.on("window-all-closed", (e) => {
-  e.preventDefault();
-});
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+    }
+  });
 
-app.on("before-quit", () => {
-  clearReminderTimer();
-  stopCursorPoll();
-});
+  app.setAppUserModelId("com.neko-window.doraemon");
+
+  app.whenReady().then(() => {
+    createWindow();
+    createTray();
+    scheduleReminders();
+    startCursorPoll();
+    registerIpc();
+
+    screen.on("display-metrics-changed", fitWindowToDisplay);
+    screen.on("display-added", fitWindowToDisplay);
+    screen.on("display-removed", fitWindowToDisplay);
+  });
+
+  app.on("window-all-closed", (e) => {
+    e.preventDefault();
+  });
+
+  app.on("before-quit", () => {
+    clearReminderTimer();
+    stopCursorPoll();
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+  });
+}

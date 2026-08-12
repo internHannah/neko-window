@@ -1,19 +1,36 @@
 (() => {
   const cfg = window.DORA_SPRITES;
+  const nekoEl = document.getElementById("neko");
+  const spriteEl = document.getElementById("sprite");
+  const bubbleEl = document.getElementById("bubble");
+
+  if (!cfg || !nekoEl || !spriteEl || !bubbleEl) {
+    console.error("[doraemon] Missing sprites config or DOM nodes");
+    return;
+  }
+
   const SIZE = cfg.size;
   const GROUND_MARGIN = 8;
+  const FRAME_MS = 16.67;
   const WALK_SPEED = 2.2;
   const RUN_SPEED = 4;
   const CLIMB_SPEED = 2;
   const GRAVITY = 0.55;
   const MAX_FALL = 14;
   const DRAG_THRESHOLD = 5;
+  const BOUNDS_REPORT_MS = 50;
+  const DRAG_STATES = new Set(["drag", "resist", "drag_left", "drag_right"]);
+  const STATIONARY = new Set([
+    "stand",
+    "sit",
+    "sleep",
+    "grab_wall",
+    "grab_ceiling",
+    "bounce",
+    "pet",
+    "water",
+  ]);
 
-  const nekoEl = document.getElementById("neko");
-  const spriteEl = document.getElementById("sprite");
-  const bubbleEl = document.getElementById("bubble");
-
-  /** @type {string} */
   let state = "stand";
   let paused = false;
   let facingRight = true;
@@ -21,8 +38,8 @@
   let animAccum = 0;
   let behaviorTimer = 0;
   let behaviorDuration = 2000;
-  let waterFramesLeft = 0;
-  let petFramesLeft = 0;
+  let waterMsLeft = 0;
+  let petMsLeft = 0;
 
   let x = 120;
   let y = 120;
@@ -40,7 +57,13 @@
   let downY = 0;
   let dragOffsetX = 0;
   let dragOffsetY = 0;
+  let lastMoveX = 0;
+  let lastMoveY = 0;
+  let lastMoveTs = 0;
+  let throwVx = 0;
+  let throwVy = 0;
   let lastFrameTs = 0;
+  let lastBoundsReport = 0;
 
   function clamp(v, min, max) {
     return Math.min(Math.max(v, min), max);
@@ -50,17 +73,18 @@
     return window.innerHeight - SIZE - GROUND_MARGIN;
   }
 
-  function reportBounds() {
-    if (window.nekoBridge) {
-      window.nekoBridge.reportBounds({ x, y, w: SIZE, h: SIZE });
-    }
+  function reportBounds(force = false) {
+    const now = performance.now();
+    if (!force && now - lastBoundsReport < BOUNDS_REPORT_MS) return;
+    lastBoundsReport = now;
+    window.nekoBridge?.reportBounds({ x, y, w: SIZE, h: SIZE });
   }
 
-  function place() {
+  function place(forceBounds = false) {
     nekoEl.style.left = `${x}px`;
     nekoEl.style.top = `${y}px`;
     nekoEl.classList.toggle("flip", facingRight);
-    reportBounds();
+    reportBounds(forceBounds);
   }
 
   function placeBubble() {
@@ -74,14 +98,17 @@
 
   function setState(next, durationMs) {
     if (state === next && durationMs == null) return;
+    const changed = state !== next;
     state = next;
-    animFrame = 0;
-    animAccum = 0;
+    if (changed) {
+      animFrame = 0;
+      animAccum = 0;
+      paintFrame(true);
+    }
     if (durationMs != null) {
       behaviorDuration = durationMs;
       behaviorTimer = 0;
     }
-    paintFrame(true);
   }
 
   function currentAnim() {
@@ -90,20 +117,18 @@
 
   function paintFrame(force) {
     const anim = currentAnim();
-    const frames = anim.frames;
-    const name = frames[animFrame % frames.length];
-    const src = cfg.basePath + name;
-    if (force || spriteEl.getAttribute("data-frame") !== name) {
-      spriteEl.src = src;
-      spriteEl.setAttribute("data-frame", name);
+    const name = anim.frames[animFrame % anim.frames.length];
+    if (force || spriteEl.dataset.frame !== name) {
+      spriteEl.src = cfg.basePath + name;
+      spriteEl.dataset.frame = name;
     }
   }
 
   function advanceAnim(dt) {
     const anim = currentAnim();
     animAccum += dt;
-    if (animAccum >= anim.frameDelay) {
-      animAccum = 0;
+    while (animAccum >= anim.frameDelay) {
+      animAccum -= anim.frameDelay;
       animFrame = (animFrame + 1) % anim.frames.length;
       paintFrame(false);
     }
@@ -123,10 +148,19 @@
     return items[items.length - 1];
   }
 
-  function chooseBehavior() {
-    if (state === "water" || state === "pet" || state === "drag" || state === "resist") {
-      return;
+  function preloadSprites() {
+    const names = new Set();
+    for (const anim of Object.values(cfg.animations)) {
+      for (const frame of anim.frames) names.add(frame);
     }
+    for (const name of names) {
+      const img = new Image();
+      img.src = cfg.basePath + name;
+    }
+  }
+
+  function chooseBehavior() {
+    if (state === "water" || state === "pet" || DRAG_STATES.has(state)) return;
 
     let choices;
     if (onCeiling) {
@@ -171,19 +205,8 @@
     setState(pick.state, randDuration(pick.d[0], pick.d[1]));
   }
 
-  function applyPhysics() {
-    const stationary = new Set([
-      "stand",
-      "sit",
-      "sleep",
-      "grab_wall",
-      "grab_ceiling",
-      "bounce",
-      "pet",
-      "water",
-    ]);
-
-    if (stationary.has(state)) {
+  function applyPhysics(scale) {
+    if (STATIONARY.has(state)) {
       vx = 0;
       vy = 0;
       if (!onGround && !onWall && !onCeiling && state !== "water" && state !== "pet") {
@@ -217,32 +240,36 @@
         onGround = false;
         break;
       case "jump":
-        vy += GRAVITY;
+        vy += GRAVITY * scale;
         if (vy > 0) setState("fall", 500);
         break;
       case "fall":
-        vy = Math.min(vy + GRAVITY, MAX_FALL);
-        vx *= 0.96;
+        vy = Math.min(vy + GRAVITY * scale, MAX_FALL);
+        vx *= Math.pow(0.96, scale);
         break;
       case "trip":
         vx = facingRight ? -6 : 6;
         vy = 0;
         break;
-      case "drag":
-      case "resist":
-      case "drag_left":
-      case "drag_right":
-        vx = 0;
-        vy = 0;
-        break;
       default:
+        if (DRAG_STATES.has(state)) {
+          vx = 0;
+          vy = 0;
+        }
         break;
+    }
+  }
+
+  function tryClimbFromEdge() {
+    if (!(state === "walk" || state === "run")) return;
+    if (Math.random() > 0.4) {
+      setState("climb_wall", randDuration(1800, 4000));
     }
   }
 
   function checkBoundaries() {
     const minX = 0;
-    const maxX = window.innerWidth - SIZE;
+    const maxX = Math.max(0, window.innerWidth - SIZE);
     const minY = 0;
     const gY = groundY();
 
@@ -251,9 +278,7 @@
       vy = 0;
       onGround = true;
       onCeiling = false;
-      if (state === "fall") {
-        setState("bounce", 220);
-      }
+      if (state === "fall") setState("bounce", 220);
     } else {
       onGround = false;
     }
@@ -262,20 +287,12 @@
       x = minX;
       onWall = "left";
       facingRight = true;
-      if (["walk", "run"].includes(state) && Math.random() > 0.4) {
-        setState("climb_wall", randDuration(1800, 4000));
-      } else if (["walk", "run"].includes(state)) {
-        facingRight = true;
-      }
+      tryClimbFromEdge();
     } else if (x >= maxX) {
       x = maxX;
       onWall = "right";
       facingRight = false;
-      if (["walk", "run"].includes(state) && Math.random() > 0.4) {
-        setState("climb_wall", randDuration(1800, 4000));
-      } else if (["walk", "run"].includes(state)) {
-        facingRight = false;
-      }
+      tryClimbFromEdge();
     } else {
       onWall = null;
     }
@@ -283,7 +300,7 @@
     if (y <= minY) {
       y = minY;
       onCeiling = true;
-      if (state === "climb_wall" || state === "jump" || state === "fall" || state === "fly") {
+      if (["climb_wall", "jump", "fall", "fly"].includes(state)) {
         setState("grab_ceiling", randDuration(600, 1600));
         vy = 0;
       }
@@ -300,7 +317,7 @@
   }
 
   function enterWater() {
-    waterFramesLeft = 50;
+    waterMsLeft = 5000;
     nekoEl.classList.add("water-mode");
     bubbleEl.classList.remove("hidden");
     placeBubble();
@@ -310,12 +327,13 @@
   }
 
   function leaveWater() {
+    waterMsLeft = 0;
     nekoEl.classList.remove("water-mode");
     bubbleEl.classList.add("hidden");
   }
 
   function enterPet() {
-    petFramesLeft = 24;
+    petMsLeft = 2400;
     nekoEl.classList.add("pet-mode");
     setState("pet", 2400);
     vx = 0;
@@ -327,16 +345,18 @@
   }
 
   function tick(dt) {
-    if (paused && state !== "water" && state !== "drag" && state !== "pet" && state !== "resist") {
-      setState("sleep");
+    const scale = dt / FRAME_MS;
+
+    if (paused && state !== "water" && !DRAG_STATES.has(state) && state !== "pet") {
+      if (state !== "sleep") setState("sleep", 999999);
       advanceAnim(dt);
       return;
     }
 
     if (state === "water") {
       placeBubble();
-      waterFramesLeft -= 1;
-      if (waterFramesLeft <= 0) {
+      waterMsLeft -= dt;
+      if (waterMsLeft <= 0) {
         leaveWater();
         setState("stand", 1500);
       }
@@ -346,8 +366,8 @@
     }
 
     if (state === "pet") {
-      petFramesLeft -= 1;
-      if (petFramesLeft <= 0) {
+      petMsLeft -= dt;
+      if (petMsLeft <= 0) {
         nekoEl.classList.remove("pet-mode");
         setState("stand", 1200);
       }
@@ -356,7 +376,7 @@
       return;
     }
 
-    if (state === "drag" || state === "resist" || state === "drag_left" || state === "drag_right") {
+    if (DRAG_STATES.has(state)) {
       advanceAnim(dt);
       place();
       return;
@@ -365,9 +385,9 @@
     behaviorTimer += dt;
     if (behaviorTimer >= behaviorDuration) chooseBehavior();
 
-    applyPhysics();
-    x += vx;
-    y += vy;
+    applyPhysics(scale);
+    x += vx * scale;
+    y += vy * scale;
     checkBoundaries();
     advanceAnim(dt);
     place();
@@ -376,6 +396,15 @@
   function onPointerMove(event) {
     mouseX = event.clientX;
     mouseY = event.clientY;
+    const now = performance.now();
+    if (lastMoveTs > 0) {
+      const sampleDt = Math.max(1, now - lastMoveTs);
+      throwVx = ((mouseX - lastMoveX) / sampleDt) * 16;
+      throwVy = ((mouseY - lastMoveY) / sampleDt) * 16;
+    }
+    lastMoveX = mouseX;
+    lastMoveY = mouseY;
+    lastMoveTs = now;
 
     if (pointerDown && !didDrag) {
       if (Math.hypot(mouseX - downX, mouseY - downY) >= DRAG_THRESHOLD) {
@@ -396,7 +425,7 @@
       if (lean < -40) setState("drag_left");
       else if (lean > 40) setState("drag_right");
       else setState("drag");
-      place();
+      place(true);
     }
   }
 
@@ -410,6 +439,11 @@
     downY = event.clientY;
     dragOffsetX = event.clientX - x;
     dragOffsetY = event.clientY - y;
+    lastMoveX = event.clientX;
+    lastMoveY = event.clientY;
+    lastMoveTs = performance.now();
+    throwVx = 0;
+    throwVy = 0;
     setInteractive(true);
   }
 
@@ -421,9 +455,10 @@
     if (didDrag) {
       didDrag = false;
       setInteractive(false);
-      // Throw / fall after drag
-      vx = clamp((event.clientX - downX) * 0.08, -12, 12);
-      vy = clamp((event.clientY - downY) * 0.05, -10, 8);
+      // Prefer recent flick velocity; fall back to total drag delta
+      const flickAged = performance.now() - lastMoveTs > 120;
+      vx = clamp(flickAged ? (event.clientX - downX) * 0.08 : throwVx * 0.9, -14, 14);
+      vy = clamp(flickAged ? (event.clientY - downY) * 0.05 : throwVy * 0.9, -12, 10);
       onGround = false;
       setState("fall", 800);
     } else if (isOver(event.clientX, event.clientY)) {
@@ -446,9 +481,9 @@
   });
 
   window.addEventListener("resize", () => {
-    x = clamp(x, 0, window.innerWidth - SIZE);
-    y = clamp(y, 0, groundY());
-    place();
+    x = clamp(x, 0, Math.max(0, window.innerWidth - SIZE));
+    y = clamp(y, 0, Math.max(0, groundY()));
+    place(true);
   });
 
   if (window.nekoBridge) {
@@ -471,16 +506,16 @@
     });
 
     window.nekoBridge.onWater(() => {
-      if (didDrag || state === "drag") return;
+      if (didDrag || DRAG_STATES.has(state)) return;
       leaveWater();
       enterWater();
     });
   }
 
-  // Start on the ground
-  x = Math.max(40, Math.random() * (window.innerWidth - SIZE - 80));
+  preloadSprites();
+  x = clamp(40 + Math.random() * (window.innerWidth - SIZE - 80), 0, Math.max(0, window.innerWidth - SIZE));
   y = groundY();
-  place();
+  place(true);
   setState("stand", 1500);
   paintFrame(true);
 
@@ -488,7 +523,7 @@
     if (!lastFrameTs) lastFrameTs = ts;
     const dt = Math.min(50, ts - lastFrameTs);
     lastFrameTs = ts;
-    tick(dt);
+    if (dt > 0) tick(dt);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
