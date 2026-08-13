@@ -8,22 +8,93 @@ const {
   ipcMain,
   screen,
 } = require("electron");
+const fs = require("fs");
 const path = require("path");
 
 const DEFAULT_INTERVAL_MS = 45 * 60 * 1000;
 const CURSOR_POLL_MS = 32;
+const TOOLTIP_REFRESH_MS = 30_000;
 
 let mainWindow = null;
 let tray = null;
 let trayMenu = null;
 let paused = false;
+let hidden = false;
+let muted = false;
+let openAtLogin = false;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
+let tooltipTimer = null;
+let nextReminderAt = 0;
 let cursorPollTimer = null;
 let nekoBounds = { x: 0, y: 0, w: 128, h: 128 };
 let forceInteractive = false;
 let ignoringMouse = true;
 let lastCursor = { x: Number.NaN, y: Number.NaN };
+let settingsPath = null;
+
+function defaultSettings() {
+  return {
+    reminderMinutes: 45,
+    muted: false,
+    openAtLogin: false,
+    hidden: false,
+  };
+}
+
+function loadSettings() {
+  const defaults = defaultSettings();
+  try {
+    if (!settingsPath || !fs.existsSync(settingsPath)) return defaults;
+    const raw = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    return {
+      reminderMinutes: [30, 45, 60].includes(raw.reminderMinutes)
+        ? raw.reminderMinutes
+        : defaults.reminderMinutes,
+      muted: !!raw.muted,
+      openAtLogin: !!raw.openAtLogin,
+      hidden: !!raw.hidden,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveSettings() {
+  if (!settingsPath) return;
+  try {
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          reminderMinutes: Math.round(reminderIntervalMs / 60000),
+          muted,
+          openAtLogin,
+          hidden,
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch (err) {
+    console.error("[doraemon] Failed to save settings:", err.message);
+  }
+}
+
+function applyOpenAtLogin(enabled) {
+  openAtLogin = enabled;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: false,
+      path: process.execPath,
+      args: [],
+    });
+  } catch (err) {
+    console.error("[doraemon] Login item failed:", err.message);
+  }
+}
 
 function createTrayIcon() {
   const candidates = [
@@ -74,7 +145,7 @@ function createWindow() {
     fullscreenable: false,
     hasShadow: false,
     focusable: true,
-    show: true,
+    show: !hidden,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -122,7 +193,7 @@ function pointInNeko(localX, localY) {
 }
 
 function pollCursor() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed() || hidden) return;
 
   const point = screen.getCursorScreenPoint();
   const [winX, winY] = mainWindow.getPosition();
@@ -149,8 +220,36 @@ function stopCursorPoll() {
   }
 }
 
+function formatCountdown(ms) {
+  if (ms <= 0) return "now";
+  const totalMin = Math.ceil(ms / 60000);
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function updateTrayTooltip() {
+  if (!tray) return;
+  const intervalMinutes = Math.round(reminderIntervalMs / 60000);
+  if (paused) {
+    tray.setToolTip("Doraemon (paused)");
+    return;
+  }
+  if (hidden) {
+    tray.setToolTip("Doraemon (hidden) — click for menu");
+    return;
+  }
+  const remaining = nextReminderAt - Date.now();
+  tray.setToolTip(
+    muted
+      ? `Doraemon · water in ${formatCountdown(remaining)} (muted)`
+      : `Doraemon · drink in ${formatCountdown(remaining)} · every ${intervalMinutes}m`
+  );
+}
+
 function showWaterNotification() {
-  if (!Notification.isSupported()) return;
+  if (muted || !Notification.isSupported()) return;
   new Notification({
     title: "Doraemon",
     body: "Time to drink water!",
@@ -158,34 +257,68 @@ function showWaterNotification() {
   }).show();
 }
 
-function triggerWaterReminder() {
-  if (paused) return;
+function triggerWaterReminder({ fromTray = false } = {}) {
+  if (paused && !fromTray) return;
+  if (hidden) {
+    setHidden(false);
+  }
   sendToNeko("neko:water");
   showWaterNotification();
+  scheduleReminders();
 }
 
 function clearReminderTimer() {
   if (reminderTimer) {
-    clearInterval(reminderTimer);
+    clearTimeout(reminderTimer);
     reminderTimer = null;
   }
 }
 
 function scheduleReminders() {
   clearReminderTimer();
-  reminderTimer = setInterval(triggerWaterReminder, reminderIntervalMs);
+  nextReminderAt = Date.now() + reminderIntervalMs;
+  reminderTimer = setTimeout(() => {
+    triggerWaterReminder();
+  }, reminderIntervalMs);
+  updateTrayTooltip();
+  buildTrayMenu();
 }
 
 function setPaused(next) {
   paused = next;
   sendToNeko("neko:pause", { paused });
+  if (!paused) scheduleReminders();
+  else updateTrayTooltip();
   buildTrayMenu();
+  saveSettings();
+}
+
+function setHidden(next) {
+  hidden = next;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (hidden) {
+    mainWindow.hide();
+    setMouseIgnore(true);
+  } else {
+    mainWindow.show();
+    fitWindowToDisplay();
+  }
+  buildTrayMenu();
+  updateTrayTooltip();
+  saveSettings();
+}
+
+function setMuted(next) {
+  muted = next;
+  buildTrayMenu();
+  updateTrayTooltip();
+  saveSettings();
 }
 
 function setReminderMinutes(minutes) {
   reminderIntervalMs = minutes * 60 * 1000;
   scheduleReminders();
-  buildTrayMenu();
+  saveSettings();
 }
 
 function buildTrayMenu() {
@@ -194,14 +327,24 @@ function buildTrayMenu() {
   const intervalMinutes = Math.round(reminderIntervalMs / 60000);
   const template = [
     { label: "Doraemon", enabled: false },
+    {
+      label: paused
+        ? "Paused"
+        : `Next drink in ${formatCountdown(nextReminderAt - Date.now())}`,
+      enabled: false,
+    },
     { type: "separator" },
     {
       label: paused ? "Resume" : "Pause",
       click: () => setPaused(!paused),
     },
     {
+      label: hidden ? "Show companion" : "Hide companion",
+      click: () => setHidden(!hidden),
+    },
+    {
       label: "Drink now",
-      click: () => triggerWaterReminder(),
+      click: () => triggerWaterReminder({ fromTray: true }),
     },
     { type: "separator" },
     {
@@ -213,6 +356,22 @@ function buildTrayMenu() {
         click: () => setReminderMinutes(mins),
       })),
     },
+    {
+      label: "Mute toast notifications",
+      type: "checkbox",
+      checked: muted,
+      click: (item) => setMuted(item.checked),
+    },
+    {
+      label: "Start with Windows",
+      type: "checkbox",
+      checked: openAtLogin,
+      click: (item) => {
+        applyOpenAtLogin(item.checked);
+        saveSettings();
+        buildTrayMenu();
+      },
+    },
     { type: "separator" },
     {
       label: "Quit",
@@ -222,11 +381,7 @@ function buildTrayMenu() {
 
   trayMenu = Menu.buildFromTemplate(template);
   tray.setContextMenu(trayMenu);
-  tray.setToolTip(
-    paused
-      ? "Doraemon (paused) — click for menu"
-      : `Doraemon · water every ${intervalMinutes}m — click for menu`
-  );
+  updateTrayTooltip();
 }
 
 function createTray() {
@@ -234,11 +389,19 @@ function createTray() {
   buildTrayMenu();
 
   const popup = () => {
+    buildTrayMenu();
     if (trayMenu) tray.popUpContextMenu(trayMenu);
   };
   tray.on("click", popup);
   tray.on("right-click", popup);
-  tray.on("double-click", () => triggerWaterReminder());
+  tray.on("double-click", () => triggerWaterReminder({ fromTray: true }));
+}
+
+function startTooltipRefresh() {
+  if (tooltipTimer) clearInterval(tooltipTimer);
+  tooltipTimer = setInterval(() => {
+    updateTrayTooltip();
+  }, TOOLTIP_REFRESH_MS);
 }
 
 function registerIpc() {
@@ -274,6 +437,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    setHidden(false);
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
@@ -283,10 +447,18 @@ if (!gotLock) {
   app.setAppUserModelId("com.neko-window.doraemon");
 
   app.whenReady().then(() => {
+    settingsPath = path.join(app.getPath("userData"), "settings.json");
+    const settings = loadSettings();
+    reminderIntervalMs = settings.reminderMinutes * 60 * 1000;
+    muted = settings.muted;
+    hidden = settings.hidden;
+    applyOpenAtLogin(settings.openAtLogin);
+
     createWindow();
     createTray();
     scheduleReminders();
     startCursorPoll();
+    startTooltipRefresh();
     registerIpc();
 
     screen.on("display-metrics-changed", fitWindowToDisplay);
@@ -299,8 +471,13 @@ if (!gotLock) {
   });
 
   app.on("before-quit", () => {
+    saveSettings();
     clearReminderTimer();
     stopCursorPoll();
+    if (tooltipTimer) {
+      clearInterval(tooltipTimer);
+      tooltipTimer = null;
+    }
     if (tray) {
       tray.destroy();
       tray = null;

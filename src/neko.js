@@ -320,6 +320,12 @@
     waterMsLeft = 5000;
     nekoEl.classList.add("water-mode");
     bubbleEl.classList.remove("hidden");
+    // Hop down to the ground so the reminder is easy to see
+    if (!onGround) {
+      onWall = null;
+      onCeiling = false;
+      y = Math.min(y, groundY());
+    }
     placeBubble();
     setState("water", 5000);
     vx = 0;
@@ -346,6 +352,25 @@
 
   function tick(dt) {
     const scale = dt / FRAME_MS;
+
+    // Look toward the cursor while idle on the ground
+    if (
+      !paused &&
+      onGround &&
+      (state === "stand" || state === "sit") &&
+      !pointerDown
+    ) {
+      const dx = mouseX - (x + SIZE / 2);
+      if (Math.abs(dx) > 24) facingRight = dx > 0;
+    }
+
+    // Wake up if the cursor comes close while sleeping
+    if (!paused && state === "sleep" && onGround) {
+      const dist = Math.hypot(mouseX - (x + SIZE / 2), mouseY - (y + SIZE / 2));
+      if (dist < SIZE * 0.9) {
+        setState("stand", 1200);
+      }
+    }
 
     if (paused && state !== "water" && !DRAG_STATES.has(state) && state !== "pet") {
       if (state !== "sleep") setState("sleep", 999999);
@@ -455,15 +480,20 @@
     if (didDrag) {
       didDrag = false;
       setInteractive(false);
-      // Prefer recent flick velocity; fall back to total drag delta
       const flickAged = performance.now() - lastMoveTs > 120;
       vx = clamp(flickAged ? (event.clientX - downX) * 0.08 : throwVx * 0.9, -14, 14);
       vy = clamp(flickAged ? (event.clientY - downY) * 0.05 : throwVy * 0.9, -12, 10);
       onGround = false;
       setState("fall", 800);
     } else if (isOver(event.clientX, event.clientY)) {
-      leaveWater();
-      enterPet();
+      // Clicking the water bubble / Doraemon dismisses the reminder early
+      if (state === "water") {
+        leaveWater();
+        setState("stand", 1200);
+      } else {
+        leaveWater();
+        enterPet();
+      }
       setInteractive(false);
     } else {
       setInteractive(false);
