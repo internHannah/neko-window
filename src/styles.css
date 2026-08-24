@@ -64,15 +64,20 @@ body {
   pointer-events: none;
   padding: 8px 12px;
   border-radius: 14px;
-  background: rgba(230, 242, 255, 0.96);
-  color: #1a5fd4;
+  background: rgba(255, 252, 245, 0.96);
+  color: #35507a;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  box-shadow: 0 2px 8px rgba(26, 95, 212, 0.25);
+  box-shadow: 0 2px 8px rgba(26, 95, 212, 0.2);
   white-space: nowrap;
   transform: translate(-50%, -100%);
   animation: bubble-pop 0.35s ease;
+}
+
+#bubble.water {
+  background: rgba(230, 242, 255, 0.96);
+  color: #1a5fd4;
 }
 
 #bubble.hidden {

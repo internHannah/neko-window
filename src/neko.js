@@ -19,6 +19,14 @@
   const MAX_FALL = 14;
   const DRAG_THRESHOLD = 5;
   const BOUNDS_REPORT_MS = 50;
+  const CHATTER = [
+    "hi!",
+    "dorayaki…",
+    "ganbatte!",
+    "need a gadget?",
+    "stay hydrated!",
+    "にゃー",
+  ];
   const DRAG_STATES = new Set(["drag", "resist", "drag_left", "drag_right"]);
   const STATIONARY = new Set([
     "stand",
@@ -30,6 +38,10 @@
     "pet",
     "water",
   ]);
+
+  let insets = { top: 0, left: 0, right: 0, bottom: 0 };
+  let chatterMsLeft = 0;
+  let chatterCooldown = 20000 + Math.random() * 20000;
 
   let state = "stand";
   let paused = false;
@@ -70,7 +82,39 @@
   }
 
   function groundY() {
-    return window.innerHeight - SIZE - GROUND_MARGIN;
+    return window.innerHeight - SIZE - GROUND_MARGIN - insets.bottom;
+  }
+
+  function minX() {
+    return insets.left;
+  }
+
+  function maxX() {
+    return Math.max(minX(), window.innerWidth - SIZE - insets.right);
+  }
+
+  function minY() {
+    return insets.top;
+  }
+
+  function showBubble(text, { water = false } = {}) {
+    bubbleEl.textContent = text;
+    bubbleEl.classList.toggle("water", water);
+    bubbleEl.classList.remove("hidden");
+    placeBubble();
+  }
+
+  function hideBubble() {
+    if (state === "water" || chatterMsLeft > 0) return;
+    bubbleEl.classList.add("hidden");
+    bubbleEl.classList.remove("water");
+  }
+
+  function showChatter() {
+    if (state === "water" || paused) return;
+    const line = CHATTER[Math.floor(Math.random() * CHATTER.length)];
+    chatterMsLeft = 3200;
+    showBubble(line, { water: false });
   }
 
   function reportBounds(force = false) {
@@ -268,9 +312,9 @@
   }
 
   function checkBoundaries() {
-    const minX = 0;
-    const maxX = Math.max(0, window.innerWidth - SIZE);
-    const minY = 0;
+    const left = minX();
+    const right = maxX();
+    const top = minY();
     const gY = groundY();
 
     if (y >= gY) {
@@ -283,13 +327,13 @@
       onGround = false;
     }
 
-    if (x <= minX) {
-      x = minX;
+    if (x <= left) {
+      x = left;
       onWall = "left";
       facingRight = true;
       tryClimbFromEdge();
-    } else if (x >= maxX) {
-      x = maxX;
+    } else if (x >= right) {
+      x = right;
       onWall = "right";
       facingRight = false;
       tryClimbFromEdge();
@@ -297,8 +341,8 @@
       onWall = null;
     }
 
-    if (y <= minY) {
-      y = minY;
+    if (y <= top) {
+      y = top;
       onCeiling = true;
       if (["climb_wall", "jump", "fall", "fly"].includes(state)) {
         setState("grab_ceiling", randDuration(600, 1600));
@@ -318,15 +362,14 @@
 
   function enterWater() {
     waterMsLeft = 5000;
+    chatterMsLeft = 0;
     nekoEl.classList.add("water-mode");
-    bubbleEl.classList.remove("hidden");
-    // Hop down to the ground so the reminder is easy to see
     if (!onGround) {
       onWall = null;
       onCeiling = false;
       y = Math.min(y, groundY());
     }
-    placeBubble();
+    showBubble("💧 drink water!", { water: true });
     setState("water", 5000);
     vx = 0;
     vy = 0;
@@ -335,7 +378,10 @@
   function leaveWater() {
     waterMsLeft = 0;
     nekoEl.classList.remove("water-mode");
-    bubbleEl.classList.add("hidden");
+    if (chatterMsLeft <= 0) {
+      bubbleEl.classList.add("hidden");
+      bubbleEl.classList.remove("water");
+    }
   }
 
   function enterPet() {
@@ -390,6 +436,22 @@
       return;
     }
 
+    if (chatterMsLeft > 0) {
+      chatterMsLeft -= dt;
+      placeBubble();
+      if (chatterMsLeft <= 0) hideBubble();
+    } else if (
+      !paused &&
+      onGround &&
+      (state === "stand" || state === "sit")
+    ) {
+      chatterCooldown -= dt;
+      if (chatterCooldown <= 0) {
+        showChatter();
+        chatterCooldown = 45000 + Math.random() * 45000;
+      }
+    }
+
     if (state === "pet") {
       petMsLeft -= dt;
       if (petMsLeft <= 0) {
@@ -441,8 +503,8 @@
     }
 
     if (pointerDown && didDrag) {
-      x = clamp(mouseX - dragOffsetX, 0, window.innerWidth - SIZE);
-      y = clamp(mouseY - dragOffsetY, 0, window.innerHeight - SIZE);
+      x = clamp(mouseX - dragOffsetX, minX(), maxX());
+      y = clamp(mouseY - dragOffsetY, minY(), groundY());
       onGround = false;
       onWall = null;
       onCeiling = false;
@@ -486,9 +548,9 @@
       onGround = false;
       setState("fall", 800);
     } else if (isOver(event.clientX, event.clientY)) {
-      // Clicking the water bubble / Doraemon dismisses the reminder early
       if (state === "water") {
         leaveWater();
+        window.nekoBridge?.snooze(10);
         setState("stand", 1200);
       } else {
         leaveWater();
@@ -511,8 +573,8 @@
   });
 
   window.addEventListener("resize", () => {
-    x = clamp(x, 0, Math.max(0, window.innerWidth - SIZE));
-    y = clamp(y, 0, Math.max(0, groundY()));
+    x = clamp(x, minX(), maxX());
+    y = clamp(y, minY(), groundY());
     place(true);
   });
 
@@ -523,10 +585,25 @@
       mouseY = cy;
     });
 
+    window.nekoBridge.onInsets((next) => {
+      if (!next) return;
+      insets = {
+        top: Number(next.top) || 0,
+        left: Number(next.left) || 0,
+        right: Number(next.right) || 0,
+        bottom: Number(next.bottom) || 0,
+      };
+      x = clamp(x, minX(), maxX());
+      y = clamp(y, minY(), groundY());
+      place(true);
+    });
+
     window.nekoBridge.onPause(({ paused: next }) => {
       paused = !!next;
       if (paused) {
         leaveWater();
+        chatterMsLeft = 0;
+        hideBubble();
         nekoEl.classList.remove("pet-mode", "drag-mode");
         setInteractive(false);
         setState("sleep", 999999);
@@ -543,7 +620,11 @@
   }
 
   preloadSprites();
-  x = clamp(40 + Math.random() * (window.innerWidth - SIZE - 80), 0, Math.max(0, window.innerWidth - SIZE));
+  x = clamp(
+    minX() + 40 + Math.random() * Math.max(0, maxX() - minX() - 80),
+    minX(),
+    maxX()
+  );
   y = groundY();
   place(true);
   setState("stand", 1500);

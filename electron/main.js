@@ -7,6 +7,8 @@ const {
   Notification,
   ipcMain,
   screen,
+  globalShortcut,
+  powerMonitor,
 } = require("electron");
 const fs = require("fs");
 const path = require("path");
@@ -21,6 +23,7 @@ let trayMenu = null;
 let paused = false;
 let hidden = false;
 let muted = false;
+let quietHours = false;
 let openAtLogin = false;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
@@ -32,11 +35,13 @@ let forceInteractive = false;
 let ignoringMouse = true;
 let lastCursor = { x: Number.NaN, y: Number.NaN };
 let settingsPath = null;
+let suspended = false;
 
 function defaultSettings() {
   return {
     reminderMinutes: 45,
     muted: false,
+    quietHours: false,
     openAtLogin: false,
     hidden: false,
   };
@@ -52,6 +57,7 @@ function loadSettings() {
         ? raw.reminderMinutes
         : defaults.reminderMinutes,
       muted: !!raw.muted,
+      quietHours: !!raw.quietHours,
       openAtLogin: !!raw.openAtLogin,
       hidden: !!raw.hidden,
     };
@@ -69,6 +75,7 @@ function saveSettings() {
         {
           reminderMinutes: Math.round(reminderIntervalMs / 60000),
           muted,
+          quietHours,
           openAtLogin,
           hidden,
         },
@@ -120,10 +127,27 @@ function createTrayIcon() {
     .resize({ width: 16, height: 16 });
 }
 
+function getWorkInsets() {
+  const display = screen.getPrimaryDisplay();
+  const b = display.bounds;
+  const w = display.workArea;
+  return {
+    top: Math.max(0, w.y - b.y),
+    left: Math.max(0, w.x - b.x),
+    right: Math.max(0, b.x + b.width - (w.x + w.width)),
+    bottom: Math.max(0, b.y + b.height - (w.y + w.height)),
+  };
+}
+
+function sendWorkInsets() {
+  sendToNeko("neko:insets", getWorkInsets());
+}
+
 function fitWindowToDisplay() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const { x, y, width, height } = screen.getPrimaryDisplay().bounds;
   mainWindow.setBounds({ x, y, width, height });
+  sendWorkInsets();
 }
 
 function createWindow() {
@@ -159,6 +183,11 @@ function createWindow() {
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
   ignoringMouse = true;
   mainWindow.loadFile(path.join(__dirname, "..", "src", "index.html"));
+
+  mainWindow.webContents.on("did-finish-load", () => {
+    sendWorkInsets();
+    sendToNeko("neko:pause", { paused });
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -229,11 +258,17 @@ function formatCountdown(ms) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+function isQuietHourNow() {
+  if (!quietHours) return false;
+  const hour = new Date().getHours();
+  return hour >= 22 || hour < 8;
+}
+
 function updateTrayTooltip() {
   if (!tray) return;
   const intervalMinutes = Math.round(reminderIntervalMs / 60000);
   if (paused) {
-    tray.setToolTip("Doraemon (paused)");
+    tray.setToolTip("Doraemon (paused) · Ctrl+Shift+P");
     return;
   }
   if (hidden) {
@@ -241,30 +276,39 @@ function updateTrayTooltip() {
     return;
   }
   const remaining = nextReminderAt - Date.now();
+  const flags = [
+    muted ? "muted" : null,
+    isQuietHourNow() ? "quiet hours" : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
   tray.setToolTip(
-    muted
-      ? `Doraemon · water in ${formatCountdown(remaining)} (muted)`
+    flags
+      ? `Doraemon · drink in ${formatCountdown(remaining)} (${flags})`
       : `Doraemon · drink in ${formatCountdown(remaining)} · every ${intervalMinutes}m`
   );
 }
 
 function showWaterNotification() {
-  if (muted || !Notification.isSupported()) return;
-  new Notification({
+  if (muted || isQuietHourNow() || !Notification.isSupported()) return;
+  const notification = new Notification({
     title: "Doraemon",
-    body: "Time to drink water!",
+    body: "Time to drink water! (Click to show me)",
     silent: false,
-  }).show();
+  });
+  notification.on("click", () => {
+    setHidden(false);
+  });
+  notification.show();
 }
 
 function triggerWaterReminder({ fromTray = false } = {}) {
+  if (suspended) return;
   if (paused && !fromTray) return;
-  if (hidden) {
-    setHidden(false);
-  }
+  if (hidden) setHidden(false);
   sendToNeko("neko:water");
   showWaterNotification();
-  scheduleReminders();
+  scheduleReminders(reminderIntervalMs);
 }
 
 function clearReminderTimer() {
@@ -274,14 +318,19 @@ function clearReminderTimer() {
   }
 }
 
-function scheduleReminders() {
+function scheduleReminders(delayMs = reminderIntervalMs) {
   clearReminderTimer();
-  nextReminderAt = Date.now() + reminderIntervalMs;
+  const delay = Math.max(5_000, delayMs);
+  nextReminderAt = Date.now() + delay;
   reminderTimer = setTimeout(() => {
     triggerWaterReminder();
-  }, reminderIntervalMs);
+  }, delay);
   updateTrayTooltip();
   buildTrayMenu();
+}
+
+function snoozeReminders(minutes = 10) {
+  scheduleReminders(minutes * 60 * 1000);
 }
 
 function setPaused(next) {
@@ -299,9 +348,11 @@ function setHidden(next) {
   if (hidden) {
     mainWindow.hide();
     setMouseIgnore(true);
+    stopCursorPoll();
   } else {
     mainWindow.show();
     fitWindowToDisplay();
+    startCursorPoll();
   }
   buildTrayMenu();
   updateTrayTooltip();
@@ -310,6 +361,13 @@ function setHidden(next) {
 
 function setMuted(next) {
   muted = next;
+  buildTrayMenu();
+  updateTrayTooltip();
+  saveSettings();
+}
+
+function setQuietHours(next) {
+  quietHours = next;
   buildTrayMenu();
   updateTrayTooltip();
   saveSettings();
@@ -336,6 +394,7 @@ function buildTrayMenu() {
     { type: "separator" },
     {
       label: paused ? "Resume" : "Pause",
+      accelerator: "CmdOrCtrl+Shift+P",
       click: () => setPaused(!paused),
     },
     {
@@ -344,7 +403,12 @@ function buildTrayMenu() {
     },
     {
       label: "Drink now",
+      accelerator: "CmdOrCtrl+Shift+D",
       click: () => triggerWaterReminder({ fromTray: true }),
+    },
+    {
+      label: "Snooze 10 minutes",
+      click: () => snoozeReminders(10),
     },
     { type: "separator" },
     {
@@ -361,6 +425,12 @@ function buildTrayMenu() {
       type: "checkbox",
       checked: muted,
       click: (item) => setMuted(item.checked),
+    },
+    {
+      label: "Quiet hours (10pm–8am)",
+      type: "checkbox",
+      checked: quietHours,
+      click: (item) => setQuietHours(item.checked),
     },
     {
       label: "Start with Windows",
@@ -404,6 +474,19 @@ function startTooltipRefresh() {
   }, TOOLTIP_REFRESH_MS);
 }
 
+function registerShortcuts() {
+  try {
+    globalShortcut.register("CommandOrControl+Shift+D", () => {
+      triggerWaterReminder({ fromTray: true });
+    });
+    globalShortcut.register("CommandOrControl+Shift+P", () => {
+      setPaused(!paused);
+    });
+  } catch (err) {
+    console.error("[doraemon] Shortcut registration failed:", err.message);
+  }
+}
+
 function registerIpc() {
   ipcMain.on("neko:bounds", (_event, bounds) => {
     if (
@@ -430,6 +513,11 @@ function registerIpc() {
   ipcMain.on("neko:set-click-through", (_event, ignore) => {
     if (!forceInteractive) setMouseIgnore(!!ignore);
   });
+
+  ipcMain.on("neko:snooze", (_event, minutes) => {
+    const mins = Number.isFinite(minutes) ? minutes : 10;
+    snoozeReminders(Math.max(1, Math.min(120, mins)));
+  });
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -451,6 +539,7 @@ if (!gotLock) {
     const settings = loadSettings();
     reminderIntervalMs = settings.reminderMinutes * 60 * 1000;
     muted = settings.muted;
+    quietHours = settings.quietHours;
     hidden = settings.hidden;
     applyOpenAtLogin(settings.openAtLogin);
 
@@ -460,6 +549,16 @@ if (!gotLock) {
     startCursorPoll();
     startTooltipRefresh();
     registerIpc();
+    registerShortcuts();
+
+    powerMonitor.on("suspend", () => {
+      suspended = true;
+      clearReminderTimer();
+    });
+    powerMonitor.on("resume", () => {
+      suspended = false;
+      if (!paused) scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+    });
 
     screen.on("display-metrics-changed", fitWindowToDisplay);
     screen.on("display-added", fitWindowToDisplay);
@@ -468,6 +567,10 @@ if (!gotLock) {
 
   app.on("window-all-closed", (e) => {
     e.preventDefault();
+  });
+
+  app.on("will-quit", () => {
+    globalShortcut.unregisterAll();
   });
 
   app.on("before-quit", () => {

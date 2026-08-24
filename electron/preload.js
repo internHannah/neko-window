@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onPause: (handler) => on("neko:pause", handler),
   onWater: (handler) => on("neko:water", () => handler()),
   onCursor: (handler) => on("neko:cursor", handler),
+  onInsets: (handler) => on("neko:insets", handler),
   reportBounds: (bounds) => {
     ipcRenderer.send("neko:bounds", bounds);
   },
@@ -18,5 +19,8 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   },
   setClickThrough: (ignore) => {
     ipcRenderer.send("neko:set-click-through", ignore);
+  },
+  snooze: (minutes = 10) => {
+    ipcRenderer.send("neko:snooze", minutes);
   },
 });
