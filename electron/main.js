@@ -25,6 +25,8 @@ let hidden = false;
 let muted = false;
 let quietHours = false;
 let openAtLogin = false;
+let animSpeed = "normal"; // slow | normal | fast
+let lastDrinkAt = 0;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
 let tooltipTimer = null;
@@ -44,6 +46,8 @@ function defaultSettings() {
     quietHours: false,
     openAtLogin: false,
     hidden: false,
+    animSpeed: "normal",
+    lastDrinkAt: 0,
   };
 }
 
@@ -52,6 +56,9 @@ function loadSettings() {
   try {
     if (!settingsPath || !fs.existsSync(settingsPath)) return defaults;
     const raw = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const speed = ["slow", "normal", "fast"].includes(raw.animSpeed)
+      ? raw.animSpeed
+      : defaults.animSpeed;
     return {
       reminderMinutes: [30, 45, 60].includes(raw.reminderMinutes)
         ? raw.reminderMinutes
@@ -60,6 +67,8 @@ function loadSettings() {
       quietHours: !!raw.quietHours,
       openAtLogin: !!raw.openAtLogin,
       hidden: !!raw.hidden,
+      animSpeed: speed,
+      lastDrinkAt: Number.isFinite(raw.lastDrinkAt) ? raw.lastDrinkAt : 0,
     };
   } catch {
     return defaults;
@@ -78,6 +87,8 @@ function saveSettings() {
           quietHours,
           openAtLogin,
           hidden,
+          animSpeed,
+          lastDrinkAt,
         },
         null,
         2
@@ -187,6 +198,7 @@ function createWindow() {
   mainWindow.webContents.on("did-finish-load", () => {
     sendWorkInsets();
     sendToNeko("neko:pause", { paused });
+    sendAnimSpeed();
   });
 
   mainWindow.on("closed", () => {
@@ -239,7 +251,8 @@ function pollCursor() {
 
 function startCursorPoll() {
   stopCursorPoll();
-  cursorPollTimer = setInterval(pollCursor, CURSOR_POLL_MS);
+  const ms = paused ? CURSOR_POLL_MS * 4 : CURSOR_POLL_MS;
+  cursorPollTimer = setInterval(pollCursor, ms);
 }
 
 function stopCursorPoll() {
@@ -329,8 +342,39 @@ function scheduleReminders(delayMs = reminderIntervalMs) {
   buildTrayMenu();
 }
 
+function formatLastDrink() {
+  if (!lastDrinkAt) return "never";
+  const mins = Math.round((Date.now() - lastDrinkAt) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function markDrankWater() {
+  lastDrinkAt = Date.now();
+  scheduleReminders();
+  saveSettings();
+  sendToNeko("neko:drank", { at: lastDrinkAt });
+  buildTrayMenu();
+}
+
 function snoozeReminders(minutes = 10) {
   scheduleReminders(minutes * 60 * 1000);
+}
+
+function sendAnimSpeed() {
+  const map = { slow: 0.7, normal: 1, fast: 1.45 };
+  sendToNeko("neko:speed", { multiplier: map[animSpeed] || 1, mode: animSpeed });
+}
+
+function setAnimSpeed(mode) {
+  if (!["slow", "normal", "fast"].includes(mode)) return;
+  animSpeed = mode;
+  sendAnimSpeed();
+  buildTrayMenu();
+  saveSettings();
 }
 
 function setPaused(next) {
@@ -338,6 +382,7 @@ function setPaused(next) {
   sendToNeko("neko:pause", { paused });
   if (!paused) scheduleReminders();
   else updateTrayTooltip();
+  if (!hidden) startCursorPoll();
   buildTrayMenu();
   saveSettings();
 }
@@ -391,6 +436,10 @@ function buildTrayMenu() {
         : `Next drink in ${formatCountdown(nextReminderAt - Date.now())}`,
       enabled: false,
     },
+    {
+      label: `Last drink: ${formatLastDrink()}`,
+      enabled: false,
+    },
     { type: "separator" },
     {
       label: paused ? "Resume" : "Pause",
@@ -407,6 +456,10 @@ function buildTrayMenu() {
       click: () => triggerWaterReminder({ fromTray: true }),
     },
     {
+      label: "I drank water ✓",
+      click: () => markDrankWater(),
+    },
+    {
       label: "Snooze 10 minutes",
       click: () => snoozeReminders(10),
     },
@@ -418,6 +471,19 @@ function buildTrayMenu() {
         type: "radio",
         checked: intervalMinutes === mins,
         click: () => setReminderMinutes(mins),
+      })),
+    },
+    {
+      label: "Animation speed",
+      submenu: [
+        { id: "slow", label: "Slow" },
+        { id: "normal", label: "Normal" },
+        { id: "fast", label: "Fast" },
+      ].map((item) => ({
+        label: item.label,
+        type: "radio",
+        checked: animSpeed === item.id,
+        click: () => setAnimSpeed(item.id),
       })),
     },
     {
@@ -518,6 +584,10 @@ function registerIpc() {
     const mins = Number.isFinite(minutes) ? minutes : 10;
     snoozeReminders(Math.max(1, Math.min(120, mins)));
   });
+
+  ipcMain.on("neko:drank", () => {
+    markDrankWater();
+  });
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -541,6 +611,8 @@ if (!gotLock) {
     muted = settings.muted;
     quietHours = settings.quietHours;
     hidden = settings.hidden;
+    animSpeed = settings.animSpeed;
+    lastDrinkAt = settings.lastDrinkAt;
     applyOpenAtLogin(settings.openAtLogin);
 
     createWindow();
@@ -550,6 +622,8 @@ if (!gotLock) {
     startTooltipRefresh();
     registerIpc();
     registerShortcuts();
+    // Apply speed after window exists; also sent on did-finish-load
+    setTimeout(sendAnimSpeed, 500);
 
     powerMonitor.on("suspend", () => {
       suspended = true;

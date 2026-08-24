@@ -42,6 +42,8 @@
   let insets = { top: 0, left: 0, right: 0, bottom: 0 };
   let chatterMsLeft = 0;
   let chatterCooldown = 20000 + Math.random() * 20000;
+  let speedMul = 1;
+  let petCount = 0;
 
   let state = "stand";
   let paused = false;
@@ -170,9 +172,10 @@
 
   function advanceAnim(dt) {
     const anim = currentAnim();
+    const delay = Math.max(30, anim.frameDelay / speedMul);
     animAccum += dt;
-    while (animAccum >= anim.frameDelay) {
-      animAccum -= anim.frameDelay;
+    while (animAccum >= delay) {
+      animAccum -= delay;
       animFrame = (animFrame + 1) % anim.frames.length;
       paintFrame(false);
     }
@@ -246,10 +249,11 @@
       onWall = null;
       onCeiling = false;
     }
-    setState(pick.state, randDuration(pick.d[0], pick.d[1]));
+    setState(pick.state, randDuration(pick.d[0], pick.d[1]) / speedMul);
   }
 
   function applyPhysics(scale) {
+    const moveScale = scale * speedMul;
     if (STATIONARY.has(state)) {
       vx = 0;
       vy = 0;
@@ -284,12 +288,12 @@
         onGround = false;
         break;
       case "jump":
-        vy += GRAVITY * scale;
+        vy += GRAVITY * moveScale;
         if (vy > 0) setState("fall", 500);
         break;
       case "fall":
-        vy = Math.min(vy + GRAVITY * scale, MAX_FALL);
-        vx *= Math.pow(0.96, scale);
+        vy = Math.min(vy + GRAVITY * moveScale, MAX_FALL);
+        vx *= Math.pow(0.96, moveScale);
         break;
       case "trip":
         vx = facingRight ? -6 : 6;
@@ -385,8 +389,11 @@
   }
 
   function enterPet() {
+    petCount += 1;
     petMsLeft = 2400;
     nekoEl.classList.add("pet-mode");
+    chatterMsLeft = 2200;
+    showBubble(petCount === 1 ? "hehe~" : `thanks! ×${petCount}`, { water: false });
     setState("pet", 2400);
     vx = 0;
     vy = 0;
@@ -420,9 +427,12 @@
 
     if (paused && state !== "water" && !DRAG_STATES.has(state) && state !== "pet") {
       if (state !== "sleep") setState("sleep", 999999);
+      nekoEl.classList.add("sleepy");
       advanceAnim(dt);
+      place();
       return;
     }
+    nekoEl.classList.toggle("sleepy", state === "sleep");
 
     if (state === "water") {
       placeBubble();
@@ -473,8 +483,8 @@
     if (behaviorTimer >= behaviorDuration) chooseBehavior();
 
     applyPhysics(scale);
-    x += vx * scale;
-    y += vy * scale;
+    x += vx * scale * speedMul;
+    y += vy * scale * speedMul;
     checkBoundaries();
     advanceAnim(dt);
     place();
@@ -550,7 +560,9 @@
     } else if (isOver(event.clientX, event.clientY)) {
       if (state === "water") {
         leaveWater();
-        window.nekoBridge?.snooze(10);
+        window.nekoBridge?.drankWater();
+        chatterMsLeft = 2500;
+        showBubble("good job!", { water: false });
         setState("stand", 1200);
       } else {
         leaveWater();
@@ -596,6 +608,19 @@
       x = clamp(x, minX(), maxX());
       y = clamp(y, minY(), groundY());
       place(true);
+    });
+
+    window.nekoBridge.onSpeed(({ multiplier }) => {
+      if (Number.isFinite(multiplier) && multiplier > 0) {
+        speedMul = Math.min(2, Math.max(0.4, multiplier));
+      }
+    });
+
+    window.nekoBridge.onDrank(() => {
+      leaveWater();
+      chatterMsLeft = 2800;
+      showBubble("nice! 💧", { water: false });
+      if (state === "water") setState("stand", 1200);
     });
 
     window.nekoBridge.onPause(({ paused: next }) => {

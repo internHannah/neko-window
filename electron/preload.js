@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onWater: (handler) => on("neko:water", () => handler()),
   onCursor: (handler) => on("neko:cursor", handler),
   onInsets: (handler) => on("neko:insets", handler),
+  onSpeed: (handler) => on("neko:speed", handler),
+  onDrank: (handler) => on("neko:drank", handler),
   reportBounds: (bounds) => {
     ipcRenderer.send("neko:bounds", bounds);
   },
@@ -22,5 +24,8 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   },
   snooze: (minutes = 10) => {
     ipcRenderer.send("neko:snooze", minutes);
+  },
+  drankWater: () => {
+    ipcRenderer.send("neko:drank");
   },
 });
