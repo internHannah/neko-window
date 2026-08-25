@@ -28,4 +28,7 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   drankWater: () => {
     ipcRenderer.send("neko:drank");
   },
+  openMenu: () => {
+    ipcRenderer.send("neko:menu");
+  },
 });

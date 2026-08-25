@@ -46,6 +46,7 @@ function defaultSettings() {
     quietHours: false,
     openAtLogin: false,
     hidden: false,
+    paused: false,
     animSpeed: "normal",
     lastDrinkAt: 0,
   };
@@ -67,6 +68,7 @@ function loadSettings() {
       quietHours: !!raw.quietHours,
       openAtLogin: !!raw.openAtLogin,
       hidden: !!raw.hidden,
+      paused: !!raw.paused,
       animSpeed: speed,
       lastDrinkAt: Number.isFinite(raw.lastDrinkAt) ? raw.lastDrinkAt : 0,
     };
@@ -87,6 +89,7 @@ function saveSettings() {
           quietHours,
           openAtLogin,
           hidden,
+          paused,
           animSpeed,
           lastDrinkAt,
         },
@@ -179,8 +182,8 @@ function createWindow() {
     movable: false,
     fullscreenable: false,
     hasShadow: false,
-    focusable: true,
-    show: !hidden,
+    focusable: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -199,6 +202,7 @@ function createWindow() {
     sendWorkInsets();
     sendToNeko("neko:pause", { paused });
     sendAnimSpeed();
+    if (!hidden) mainWindow.showInactive();
   });
 
   mainWindow.on("closed", () => {
@@ -395,7 +399,7 @@ function setHidden(next) {
     setMouseIgnore(true);
     stopCursorPoll();
   } else {
-    mainWindow.show();
+    mainWindow.showInactive();
     fitWindowToDisplay();
     startCursorPoll();
   }
@@ -588,6 +592,12 @@ function registerIpc() {
   ipcMain.on("neko:drank", () => {
     markDrankWater();
   });
+
+  ipcMain.on("neko:menu", () => {
+    buildTrayMenu();
+    if (!tray || !trayMenu) return;
+    tray.popUpContextMenu(trayMenu, screen.getCursorScreenPoint());
+  });
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -598,7 +608,7 @@ if (!gotLock) {
     setHidden(false);
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
+      mainWindow.showInactive();
     }
   });
 
@@ -611,25 +621,33 @@ if (!gotLock) {
     muted = settings.muted;
     quietHours = settings.quietHours;
     hidden = settings.hidden;
+    paused = settings.paused;
     animSpeed = settings.animSpeed;
     lastDrinkAt = settings.lastDrinkAt;
     applyOpenAtLogin(settings.openAtLogin);
 
     createWindow();
     createTray();
-    scheduleReminders();
+    if (paused) updateTrayTooltip();
+    else scheduleReminders();
     startCursorPoll();
     startTooltipRefresh();
     registerIpc();
     registerShortcuts();
-    // Apply speed after window exists; also sent on did-finish-load
-    setTimeout(sendAnimSpeed, 500);
 
     powerMonitor.on("suspend", () => {
       suspended = true;
       clearReminderTimer();
     });
     powerMonitor.on("resume", () => {
+      suspended = false;
+      if (!paused) scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+    });
+    powerMonitor.on("lock-screen", () => {
+      suspended = true;
+      clearReminderTimer();
+    });
+    powerMonitor.on("unlock-screen", () => {
       suspended = false;
       if (!paused) scheduleReminders(Math.min(reminderIntervalMs, 60_000));
     });

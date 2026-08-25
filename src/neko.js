@@ -37,6 +37,9 @@
     "bounce",
     "pet",
     "water",
+    "greet",
+    "curious",
+    "play",
   ]);
 
   let insets = { top: 0, left: 0, right: 0, bottom: 0 };
@@ -78,6 +81,9 @@
   let throwVy = 0;
   let lastFrameTs = 0;
   let lastBoundsReport = 0;
+  let hoverMs = 0;
+  let curiousCooldown = 8000;
+  let dragStartedAt = 0;
 
   function clamp(v, min, max) {
     return Math.min(Math.max(v, min), max);
@@ -223,14 +229,18 @@
         { state: "fall", w: 50, d: [200, 400] },
       ];
     } else if (onGround) {
+      const mouseDist = Math.hypot(mouseX - (x + SIZE / 2), mouseY - (y + SIZE / 2));
       choices = [
-        { state: "stand", w: 120, d: [1200, 2800] },
-        { state: "sit", w: 90, d: [2000, 4500] },
-        { state: "walk", w: 140, d: [2200, 4500] },
-        { state: "run", w: 50, d: [1200, 2500] },
-        { state: "sleep", w: 35, d: [4000, 8000] },
-        { state: "jump", w: 25, d: [600, 900] },
-        { state: "fly", w: 20, d: [2000, 3500] },
+        { state: "stand", w: 110, d: [1200, 2800] },
+        { state: "sit", w: 80, d: [2000, 4500] },
+        { state: "walk", w: 120, d: [2200, 4500] },
+        { state: "run", w: 40, d: [1200, 2500] },
+        { state: "chase", w: mouseDist > 160 ? 90 : 35, d: [1600, 3800] },
+        { state: "sleep", w: 30, d: [4000, 8000] },
+        { state: "jump", w: 22, d: [600, 900] },
+        { state: "fly", w: 18, d: [2000, 3500] },
+        { state: "play", w: 28, d: [1600, 3000] },
+        { state: "greet", w: 12, d: [1600, 2200] },
       ];
     } else {
       setState("fall", 400);
@@ -248,6 +258,10 @@
     if (pick.state === "fall") {
       onWall = null;
       onCeiling = false;
+    }
+    if (pick.state === "greet" && chatterMsLeft <= 0) {
+      chatterMsLeft = 2200;
+      showBubble("hi!");
     }
     setState(pick.state, randDuration(pick.d[0], pick.d[1]) / speedMul);
   }
@@ -274,6 +288,22 @@
         vy = 0;
         if (!onGround) setState("fall", 400);
         break;
+      case "chase": {
+        const dx = mouseX - (x + SIZE / 2);
+        const dist = Math.hypot(dx, mouseY - (y + SIZE / 2));
+        if (dist < SIZE * 0.55) {
+          vx = 0;
+          vy = 0;
+          setState("stand", 900);
+          break;
+        }
+        facingRight = dx >= 0;
+        const speed = dist > 200 ? RUN_SPEED : WALK_SPEED;
+        vx = facingRight ? speed : -speed;
+        vy = 0;
+        if (!onGround) setState("fall", 400);
+        break;
+      }
       case "climb_wall":
         vx = 0;
         vy = -CLIMB_SPEED;
@@ -309,7 +339,7 @@
   }
 
   function tryClimbFromEdge() {
-    if (!(state === "walk" || state === "run")) return;
+    if (!(state === "walk" || state === "run" || state === "chase")) return;
     if (Math.random() > 0.4) {
       setState("climb_wall", randDuration(1800, 4000));
     }
@@ -322,11 +352,15 @@
     const gY = groundY();
 
     if (y >= gY) {
+      const impact = vy;
       y = gY;
       vy = 0;
       onGround = true;
       onCeiling = false;
-      if (state === "fall") setState("bounce", 220);
+      if (state === "fall") {
+        if (impact >= 10 || Math.abs(vx) >= 9) setState("trip", 560);
+        else setState("bounce", 220);
+      }
     } else {
       onGround = false;
     }
@@ -415,6 +449,19 @@
     ) {
       const dx = mouseX - (x + SIZE / 2);
       if (Math.abs(dx) > 24) facingRight = dx > 0;
+      if (isOver(mouseX, mouseY)) {
+        hoverMs += dt;
+        curiousCooldown -= dt;
+        if (hoverMs > 650 && curiousCooldown <= 0) {
+          setState("curious", randDuration(1200, 2000));
+          hoverMs = 0;
+          curiousCooldown = 10000 + Math.random() * 8000;
+        }
+      } else {
+        hoverMs = 0;
+      }
+    } else {
+      hoverMs = 0;
     }
 
     // Wake up if the cursor comes close while sleeping
@@ -519,7 +566,8 @@
       onWall = null;
       onCeiling = false;
       const lean = mouseX - downX;
-      if (lean < -40) setState("drag_left");
+      if (performance.now() - dragStartedAt > 1700) setState("resist");
+      else if (lean < -40) setState("drag_left");
       else if (lean > 40) setState("drag_right");
       else setState("drag");
       place(true);
@@ -541,6 +589,7 @@
     lastMoveTs = performance.now();
     throwVx = 0;
     throwVy = 0;
+    dragStartedAt = performance.now();
     setInteractive(true);
   }
 
@@ -577,6 +626,10 @@
   nekoEl.addEventListener("mousedown", onPointerDown);
   document.addEventListener("mousemove", onPointerMove);
   document.addEventListener("mouseup", onPointerUp);
+  nekoEl.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    window.nekoBridge?.openMenu();
+  });
   window.addEventListener("blur", () => {
     pointerDown = false;
     didDrag = false;
@@ -652,7 +705,9 @@
   );
   y = groundY();
   place(true);
-  setState("stand", 1500);
+  chatterMsLeft = 2600;
+  showBubble("hello!");
+  setState("greet", 2000);
   paintFrame(true);
 
   function loop(ts) {

@@ -26,8 +26,24 @@ window.DORA_SPRITES = {
     drag_left: { frames: ["shime7.png"], frameDelay: 83 },
     drag_right: { frames: ["shime6.png"], frameDelay: 83 },
     resist: {
-      frames: ["shime5.png", "shime6.png", "shime5.png", "shime6.png", "shimeX.png"],
-      frameDelay: 83,
+      frames: ["shime8.png", "shime9.png", "shime8.png", "shime10.png"],
+      frameDelay: 90,
+    },
+    greet: {
+      frames: ["action-greeting-01.png", "shime1.png", "action-greeting-01.png", "shime1a.png"],
+      frameDelay: 160,
+    },
+    curious: {
+      frames: ["emotion-curiosity-01.png", "shime1a.png", "emotion-curiosity-01.png"],
+      frameDelay: 180,
+    },
+    chase: {
+      frames: ["shime1.png", "shime2.png", "shime1.png", "shime3.png"],
+      frameDelay: 50,
+    },
+    play: {
+      frames: ["shime21.png", "shime21a.png", "shime21.png", "shime26.png"],
+      frameDelay: 180,
     },
     sit: {
       frames: [
