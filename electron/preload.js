@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onInsets: (handler) => on("neko:insets", handler),
   onSpeed: (handler) => on("neko:speed", handler),
   onDrank: (handler) => on("neko:drank", handler),
+  onSpawn: (handler) => on("neko:spawn", handler),
   reportBounds: (bounds) => {
     ipcRenderer.send("neko:bounds", bounds);
   },

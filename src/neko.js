@@ -84,6 +84,8 @@
   let hoverMs = 0;
   let curiousCooldown = 8000;
   let dragStartedAt = 0;
+  let climbDir = -1;
+  let pointerId = null;
 
   function clamp(v, min, max) {
     return Math.min(Math.max(v, min), max);
@@ -109,13 +111,16 @@
     bubbleEl.textContent = text;
     bubbleEl.classList.toggle("water", water);
     bubbleEl.classList.remove("hidden");
+    bubbleEl.classList.remove("pop");
+    void bubbleEl.offsetWidth;
+    bubbleEl.classList.add("pop");
     placeBubble();
   }
 
   function hideBubble() {
     if (state === "water" || chatterMsLeft > 0) return;
     bubbleEl.classList.add("hidden");
-    bubbleEl.classList.remove("water");
+    bubbleEl.classList.remove("water", "pop");
   }
 
   function showChatter() {
@@ -140,8 +145,12 @@
   }
 
   function placeBubble() {
-    bubbleEl.style.left = `${x + SIZE / 2}px`;
-    bubbleEl.style.top = `${y - 4}px`;
+    const bw = bubbleEl.offsetWidth || 96;
+    const bh = bubbleEl.offsetHeight || 36;
+    const minLeft = insets.left + bw / 2 + 8;
+    const maxLeft = window.innerWidth - insets.right - bw / 2 - 8;
+    bubbleEl.style.left = `${clamp(x + SIZE / 2, minLeft, Math.max(minLeft, maxLeft))}px`;
+    bubbleEl.style.top = `${Math.max(insets.top + bh + 8, y - 4)}px`;
   }
 
   function setInteractive(active) {
@@ -223,20 +232,24 @@
         { state: "fall", w: 60, d: [200, 400] },
       ];
     } else if (onWall) {
+      const nearTop = y <= minY() + 40;
+      const nearGround = y >= groundY() - 40;
       choices = [
         { state: "grab_wall", w: 80, d: [600, 1600] },
-        { state: "climb_wall", w: 120, d: [1800, 4000] },
+        { state: "climb_wall", w: nearTop || nearGround ? 140 : 120, d: [1800, 4000] },
         { state: "fall", w: 50, d: [200, 400] },
       ];
     } else if (onGround) {
       const mouseDist = Math.hypot(mouseX - (x + SIZE / 2), mouseY - (y + SIZE / 2));
+      const hour = new Date().getHours();
+      const night = hour >= 22 || hour < 8;
       choices = [
         { state: "stand", w: 110, d: [1200, 2800] },
         { state: "sit", w: 80, d: [2000, 4500] },
         { state: "walk", w: 120, d: [2200, 4500] },
         { state: "run", w: 40, d: [1200, 2500] },
         { state: "chase", w: mouseDist > 160 ? 90 : 35, d: [1600, 3800] },
-        { state: "sleep", w: 30, d: [4000, 8000] },
+        { state: "sleep", w: night ? 90 : 30, d: night ? [6000, 12000] : [4000, 8000] },
         { state: "jump", w: 22, d: [600, 900] },
         { state: "fly", w: 18, d: [2000, 3500] },
         { state: "play", w: 28, d: [1600, 3000] },
@@ -258,6 +271,11 @@
     if (pick.state === "fall") {
       onWall = null;
       onCeiling = false;
+    }
+    if (pick.state === "climb_wall") {
+      if (y <= minY() + 40) climbDir = 1;
+      else if (y >= groundY() - 40) climbDir = -1;
+      else climbDir = Math.random() < 0.45 ? 1 : -1;
     }
     if (pick.state === "greet" && chatterMsLeft <= 0) {
       chatterMsLeft = 2200;
@@ -306,7 +324,7 @@
       }
       case "climb_wall":
         vx = 0;
-        vy = -CLIMB_SPEED;
+        vy = climbDir * CLIMB_SPEED;
         break;
       case "climb_ceiling":
         vx = facingRight ? WALK_SPEED : -WALK_SPEED;
@@ -341,6 +359,7 @@
   function tryClimbFromEdge() {
     if (!(state === "walk" || state === "run" || state === "chase")) return;
     if (Math.random() > 0.4) {
+      climbDir = -1;
       setState("climb_wall", randDuration(1800, 4000));
     }
   }
@@ -360,6 +379,8 @@
       if (state === "fall") {
         if (impact >= 10 || Math.abs(vx) >= 9) setState("trip", 560);
         else setState("bounce", 220);
+      } else if (state === "climb_wall" && climbDir > 0) {
+        setState("stand", 900);
       }
     } else {
       onGround = false;
@@ -537,7 +558,20 @@
     place();
   }
 
+  function releasePointer(event) {
+    const id = event?.pointerId ?? pointerId;
+    if (id != null) {
+      try {
+        if (nekoEl.hasPointerCapture(id)) nekoEl.releasePointerCapture(id);
+      } catch {
+        /* already released */
+      }
+    }
+    pointerId = null;
+  }
+
   function onPointerMove(event) {
+    if (pointerDown && pointerId != null && event.pointerId !== pointerId) return;
     mouseX = event.clientX;
     mouseY = event.clientY;
     const now = performance.now();
@@ -590,13 +624,21 @@
     throwVx = 0;
     throwVy = 0;
     dragStartedAt = performance.now();
+    pointerId = event.pointerId;
+    try {
+      nekoEl.setPointerCapture(event.pointerId);
+    } catch {
+      /* capture unsupported */
+    }
     setInteractive(true);
   }
 
   function onPointerUp(event) {
     if (!pointerDown) return;
+    if (pointerId != null && event.pointerId !== pointerId) return;
     pointerDown = false;
     nekoEl.classList.remove("drag-mode");
+    releasePointer(event);
 
     if (didDrag) {
       didDrag = false;
@@ -623,9 +665,10 @@
     }
   }
 
-  nekoEl.addEventListener("mousedown", onPointerDown);
-  document.addEventListener("mousemove", onPointerMove);
-  document.addEventListener("mouseup", onPointerUp);
+  nekoEl.addEventListener("pointerdown", onPointerDown);
+  document.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointerup", onPointerUp);
+  document.addEventListener("pointercancel", onPointerUp);
   nekoEl.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     window.nekoBridge?.openMenu();
@@ -634,6 +677,7 @@
     pointerDown = false;
     didDrag = false;
     nekoEl.classList.remove("drag-mode");
+    releasePointer();
     setInteractive(false);
   });
 
@@ -660,6 +704,13 @@
       };
       x = clamp(x, minX(), maxX());
       y = clamp(y, minY(), groundY());
+      place(true);
+    });
+
+    window.nekoBridge.onSpawn((pos) => {
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+      x = clamp(pos.x, minX(), maxX());
+      y = clamp(pos.y, minY(), groundY());
       place(true);
     });
 

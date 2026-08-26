@@ -33,6 +33,8 @@ let tooltipTimer = null;
 let nextReminderAt = 0;
 let cursorPollTimer = null;
 let nekoBounds = { x: 0, y: 0, w: 128, h: 128 };
+let savedSpawn = null;
+let hasBounds = false;
 let forceInteractive = false;
 let ignoringMouse = true;
 let lastCursor = { x: Number.NaN, y: Number.NaN };
@@ -49,6 +51,8 @@ function defaultSettings() {
     paused: false,
     animSpeed: "normal",
     lastDrinkAt: 0,
+    lastX: null,
+    lastY: null,
   };
 }
 
@@ -71,6 +75,8 @@ function loadSettings() {
       paused: !!raw.paused,
       animSpeed: speed,
       lastDrinkAt: Number.isFinite(raw.lastDrinkAt) ? raw.lastDrinkAt : 0,
+      lastX: Number.isFinite(raw.lastX) ? raw.lastX : null,
+      lastY: Number.isFinite(raw.lastY) ? raw.lastY : null,
     };
   } catch {
     return defaults;
@@ -80,24 +86,26 @@ function loadSettings() {
 function saveSettings() {
   if (!settingsPath) return;
   try {
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify(
-        {
-          reminderMinutes: Math.round(reminderIntervalMs / 60000),
-          muted,
-          quietHours,
-          openAtLogin,
-          hidden,
-          paused,
-          animSpeed,
-          lastDrinkAt,
-        },
-        null,
-        2
-      ),
-      "utf8"
+    const payload = JSON.stringify(
+      {
+        reminderMinutes: Math.round(reminderIntervalMs / 60000),
+        muted,
+        quietHours,
+        openAtLogin,
+        hidden,
+        paused,
+        animSpeed,
+        lastDrinkAt,
+        lastX: hasBounds ? Math.round(nekoBounds.x) : null,
+        lastY: hasBounds ? Math.round(nekoBounds.y) : null,
+      },
+      null,
+      2
     );
+    const tmp = `${settingsPath}.tmp`;
+    fs.writeFileSync(tmp, payload, "utf8");
+    fs.copyFileSync(tmp, settingsPath);
+    fs.unlinkSync(tmp);
   } catch (err) {
     console.error("[doraemon] Failed to save settings:", err.message);
   }
@@ -196,12 +204,14 @@ function createWindow() {
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
   ignoringMouse = true;
+  mainWindow.webContents.setBackgroundThrottling(false);
   mainWindow.loadFile(path.join(__dirname, "..", "src", "index.html"));
 
   mainWindow.webContents.on("did-finish-load", () => {
     sendWorkInsets();
     sendToNeko("neko:pause", { paused });
     sendAnimSpeed();
+    sendToNeko("neko:spawn", savedSpawn);
     if (!hidden) mainWindow.showInactive();
   });
 
@@ -572,6 +582,7 @@ function registerIpc() {
         w: Math.max(1, bounds.w),
         h: Math.max(1, bounds.h),
       };
+      hasBounds = true;
     }
   });
 
@@ -624,6 +635,11 @@ if (!gotLock) {
     paused = settings.paused;
     animSpeed = settings.animSpeed;
     lastDrinkAt = settings.lastDrinkAt;
+    if (Number.isFinite(settings.lastX) && Number.isFinite(settings.lastY)) {
+      savedSpawn = { x: settings.lastX, y: settings.lastY };
+      nekoBounds = { ...nekoBounds, x: settings.lastX, y: settings.lastY };
+      hasBounds = true;
+    }
     applyOpenAtLogin(settings.openAtLogin);
 
     createWindow();
