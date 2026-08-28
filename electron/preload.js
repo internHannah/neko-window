@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onSpeed: (handler) => on("neko:speed", handler),
   onDrank: (handler) => on("neko:drank", handler),
   onSpawn: (handler) => on("neko:spawn", handler),
+  onIdle: (handler) => on("neko:idle", handler),
   reportBounds: (bounds) => {
     ipcRenderer.send("neko:bounds", bounds);
   },

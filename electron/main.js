@@ -16,6 +16,8 @@ const path = require("path");
 const DEFAULT_INTERVAL_MS = 45 * 60 * 1000;
 const CURSOR_POLL_MS = 32;
 const TOOLTIP_REFRESH_MS = 30_000;
+const DISPLAY_SWITCH_MS = 350;
+const USER_IDLE_MS = 2 * 60 * 1000;
 
 let mainWindow = null;
 let tray = null;
@@ -35,6 +37,11 @@ let cursorPollTimer = null;
 let nekoBounds = { x: 0, y: 0, w: 128, h: 128 };
 let savedSpawn = null;
 let hasBounds = false;
+let lastDisplayId = null;
+let pendingDisplayId = null;
+let displaySwitchAt = 0;
+let lastCursorMoveAt = 0;
+let userIdle = false;
 let forceInteractive = false;
 let ignoringMouse = true;
 let lastCursor = { x: Number.NaN, y: Number.NaN };
@@ -53,6 +60,7 @@ function defaultSettings() {
     lastDrinkAt: 0,
     lastX: null,
     lastY: null,
+    lastDisplayId: null,
   };
 }
 
@@ -77,6 +85,7 @@ function loadSettings() {
       lastDrinkAt: Number.isFinite(raw.lastDrinkAt) ? raw.lastDrinkAt : 0,
       lastX: Number.isFinite(raw.lastX) ? raw.lastX : null,
       lastY: Number.isFinite(raw.lastY) ? raw.lastY : null,
+      lastDisplayId: Number.isFinite(raw.lastDisplayId) ? raw.lastDisplayId : null,
     };
   } catch {
     return defaults;
@@ -98,6 +107,7 @@ function saveSettings() {
         lastDrinkAt,
         lastX: hasBounds ? Math.round(nekoBounds.x) : null,
         lastY: hasBounds ? Math.round(nekoBounds.y) : null,
+        lastDisplayId: lastDisplayId,
       },
       null,
       2
@@ -149,8 +159,15 @@ function createTrayIcon() {
     .resize({ width: 16, height: 16 });
 }
 
-function getWorkInsets() {
-  const display = screen.getPrimaryDisplay();
+function resolveDisplay() {
+  if (lastDisplayId != null) {
+    const found = screen.getAllDisplays().find((d) => d.id === lastDisplayId);
+    if (found) return found;
+  }
+  return screen.getPrimaryDisplay();
+}
+
+function getWorkInsets(display = resolveDisplay()) {
   const b = display.bounds;
   const w = display.workArea;
   return {
@@ -161,20 +178,32 @@ function getWorkInsets() {
   };
 }
 
-function sendWorkInsets() {
-  sendToNeko("neko:insets", getWorkInsets());
+function sendWorkInsets(display) {
+  sendToNeko("neko:insets", getWorkInsets(display || resolveDisplay()));
 }
 
-function fitWindowToDisplay() {
+function fitWindowToDisplay(display) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const { x, y, width, height } = screen.getPrimaryDisplay().bounds;
+  const target = display || resolveDisplay();
+  const { x, y, width, height } = target.bounds;
+  lastDisplayId = target.id;
   mainWindow.setBounds({ x, y, width, height });
-  sendWorkInsets();
+  sendWorkInsets(target);
+}
+
+function adoptDisplay(display) {
+  if (!display) return;
+  const changed = lastDisplayId !== display.id;
+  lastDisplayId = display.id;
+  pendingDisplayId = null;
+  fitWindowToDisplay(display);
+  if (changed) saveSettings();
 }
 
 function createWindow() {
-  const display = screen.getPrimaryDisplay();
+  const display = resolveDisplay();
   const { x, y, width, height } = display.bounds;
+  lastDisplayId = display.id;
 
   mainWindow = new BrowserWindow({
     width,
@@ -215,6 +244,14 @@ function createWindow() {
     if (!hidden) mainWindow.showInactive();
   });
 
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[doraemon] Renderer gone:", details.reason);
+    if (details.reason === "clean-exit") return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.reload();
+    }
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -251,13 +288,33 @@ function pollCursor() {
   if (!mainWindow || mainWindow.isDestroyed() || hidden) return;
 
   const point = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(point);
+  if (display.id !== lastDisplayId) {
+    if (pendingDisplayId !== display.id) {
+      pendingDisplayId = display.id;
+      displaySwitchAt = Date.now();
+    } else if (Date.now() - displaySwitchAt >= DISPLAY_SWITCH_MS) {
+      adoptDisplay(display);
+    }
+  } else {
+    pendingDisplayId = null;
+  }
+
   const [winX, winY] = mainWindow.getPosition();
   const localX = point.x - winX;
   const localY = point.y - winY;
 
   if (localX !== lastCursor.x || localY !== lastCursor.y) {
     lastCursor = { x: localX, y: localY };
+    lastCursorMoveAt = Date.now();
     sendToNeko("neko:cursor", lastCursor);
+    if (userIdle) {
+      userIdle = false;
+      sendToNeko("neko:idle", { idle: false });
+    }
+  } else if (!userIdle && lastCursorMoveAt && Date.now() - lastCursorMoveAt >= USER_IDLE_MS) {
+    userIdle = true;
+    sendToNeko("neko:idle", { idle: true });
   }
 
   setMouseIgnore(!(forceInteractive || pointInNeko(localX, localY)));
@@ -318,10 +375,12 @@ function updateTrayTooltip() {
 
 function showWaterNotification() {
   if (muted || isQuietHourNow() || !Notification.isSupported()) return;
+  const iconPath = path.join(__dirname, "..", "assets", "dora-sprites", "icon.png");
   const notification = new Notification({
     title: "Doraemon",
     body: "Time to drink water! (Click to show me)",
     silent: false,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
   });
   notification.on("click", () => {
     setHidden(false);
@@ -408,7 +467,9 @@ function setHidden(next) {
     mainWindow.hide();
     setMouseIgnore(true);
     stopCursorPoll();
+    mainWindow.webContents.setBackgroundThrottling(true);
   } else {
+    mainWindow.webContents.setBackgroundThrottling(false);
     mainWindow.showInactive();
     fitWindowToDisplay();
     startCursorPoll();
@@ -640,6 +701,9 @@ if (!gotLock) {
       nekoBounds = { ...nekoBounds, x: settings.lastX, y: settings.lastY };
       hasBounds = true;
     }
+    if (Number.isFinite(settings.lastDisplayId)) {
+      lastDisplayId = settings.lastDisplayId;
+    }
     applyOpenAtLogin(settings.openAtLogin);
 
     createWindow();
@@ -650,6 +714,7 @@ if (!gotLock) {
     startTooltipRefresh();
     registerIpc();
     registerShortcuts();
+    lastCursorMoveAt = Date.now();
 
     powerMonitor.on("suspend", () => {
       suspended = true;

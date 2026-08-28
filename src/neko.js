@@ -86,6 +86,8 @@
   let dragStartedAt = 0;
   let climbDir = -1;
   let pointerId = null;
+  let userIdle = false;
+  let pageHidden = false;
 
   function clamp(v, min, max) {
     return Math.min(Math.max(v, min), max);
@@ -243,13 +245,14 @@
       const mouseDist = Math.hypot(mouseX - (x + SIZE / 2), mouseY - (y + SIZE / 2));
       const hour = new Date().getHours();
       const night = hour >= 22 || hour < 8;
+      const sleepy = night || userIdle;
       choices = [
         { state: "stand", w: 110, d: [1200, 2800] },
         { state: "sit", w: 80, d: [2000, 4500] },
         { state: "walk", w: 120, d: [2200, 4500] },
         { state: "run", w: 40, d: [1200, 2500] },
-        { state: "chase", w: mouseDist > 160 ? 90 : 35, d: [1600, 3800] },
-        { state: "sleep", w: night ? 90 : 30, d: night ? [6000, 12000] : [4000, 8000] },
+        { state: "chase", w: userIdle ? 8 : mouseDist > 160 ? 90 : 35, d: [1600, 3800] },
+        { state: "sleep", w: sleepy ? 90 : 30, d: sleepy ? [6000, 12000] : [4000, 8000] },
         { state: "jump", w: 22, d: [600, 900] },
         { state: "fly", w: 18, d: [2000, 3500] },
         { state: "play", w: 28, d: [1600, 3000] },
@@ -687,6 +690,11 @@
     place(true);
   });
 
+  document.addEventListener("visibilitychange", () => {
+    pageHidden = document.hidden;
+    if (!pageHidden) lastFrameTs = 0;
+  });
+
   if (window.nekoBridge) {
     window.nekoBridge.onCursor(({ x: cx, y: cy }) => {
       if (pointerDown || didDrag) return;
@@ -712,6 +720,20 @@
       x = clamp(pos.x, minX(), maxX());
       y = clamp(pos.y, minY(), groundY());
       place(true);
+    });
+
+    window.nekoBridge.onIdle(({ idle }) => {
+      userIdle = !!idle;
+      if (
+        userIdle &&
+        onGround &&
+        !paused &&
+        !DRAG_STATES.has(state) &&
+        state !== "water" &&
+        state !== "pet"
+      ) {
+        setState("sleep", 20000);
+      }
     });
 
     window.nekoBridge.onSpeed(({ multiplier }) => {
@@ -762,6 +784,11 @@
   paintFrame(true);
 
   function loop(ts) {
+    if (pageHidden) {
+      lastFrameTs = 0;
+      requestAnimationFrame(loop);
+      return;
+    }
     if (!lastFrameTs) lastFrameTs = ts;
     const dt = Math.min(50, ts - lastFrameTs);
     lastFrameTs = ts;

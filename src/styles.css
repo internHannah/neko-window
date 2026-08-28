@@ -6,6 +6,7 @@ body {
   overflow: hidden;
   background: transparent;
   user-select: none;
+  touch-action: none;
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
