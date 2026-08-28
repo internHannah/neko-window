@@ -12,9 +12,11 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onCursor: (handler) => on("neko:cursor", handler),
   onInsets: (handler) => on("neko:insets", handler),
   onSpeed: (handler) => on("neko:speed", handler),
+  onSize: (handler) => on("neko:size", handler),
   onDrank: (handler) => on("neko:drank", handler),
   onSpawn: (handler) => on("neko:spawn", handler),
   onIdle: (handler) => on("neko:idle", handler),
+  onRecall: (handler) => on("neko:recall", () => handler()),
   reportBounds: (bounds) => {
     ipcRenderer.send("neko:bounds", bounds);
   },

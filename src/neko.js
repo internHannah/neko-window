@@ -9,7 +9,9 @@
     return;
   }
 
-  const SIZE = cfg.size;
+  const BASE_SIZE = cfg.size;
+  let SIZE = BASE_SIZE;
+  const SIZE_MAP = { small: 96, normal: 128, large: 160 };
   const GROUND_MARGIN = 8;
   const FRAME_MS = 16.67;
   const WALK_SPEED = 2.2;
@@ -19,14 +21,13 @@
   const MAX_FALL = 14;
   const DRAG_THRESHOLD = 5;
   const BOUNDS_REPORT_MS = 50;
-  const CHATTER = [
-    "hi!",
-    "dorayaki…",
-    "ganbatte!",
-    "need a gadget?",
-    "stay hydrated!",
-    "にゃー",
-  ];
+  const DOUBLE_CLICK_MS = 340;
+  const CHATTER = {
+    morning: ["ohayo!", "good morning!", "stretch~", "dorayaki breakfast?"],
+    day: ["hi!", "ganbatte!", "need a gadget?", "stay hydrated!", "にゃー"],
+    evening: ["okaeri!", "good evening!", "rest soon?", "water before bed?"],
+    night: ["zzz…", "still up?", "quiet time", "drink + sleep"],
+  };
   const DRAG_STATES = new Set(["drag", "resist", "drag_left", "drag_right"]);
   const STATIONARY = new Set([
     "stand",
@@ -47,6 +48,8 @@
   let chatterCooldown = 20000 + Math.random() * 20000;
   let speedMul = 1;
   let petCount = 0;
+  let lastClickAt = 0;
+  let recallTarget = null;
 
   let state = "stand";
   let paused = false;
@@ -127,9 +130,48 @@
 
   function showChatter() {
     if (state === "water" || paused) return;
-    const line = CHATTER[Math.floor(Math.random() * CHATTER.length)];
+    const hour = new Date().getHours();
+    const bucket =
+      hour >= 5 && hour < 12
+        ? "morning"
+        : hour >= 12 && hour < 18
+          ? "day"
+          : hour >= 18 && hour < 22
+            ? "evening"
+            : "night";
+    const lines = CHATTER[bucket];
+    const line = lines[Math.floor(Math.random() * lines.length)];
     chatterMsLeft = 3200;
     showBubble(line, { water: false });
+  }
+
+  function applySize(mode) {
+    const next = SIZE_MAP[mode] || BASE_SIZE;
+    const cx = x + SIZE / 2;
+    const cy = y + SIZE / 2;
+    SIZE = next;
+    nekoEl.style.width = `${SIZE}px`;
+    nekoEl.style.height = `${SIZE}px`;
+    spriteEl.style.width = `${SIZE}px`;
+    spriteEl.style.height = `${SIZE}px`;
+    x = clamp(cx - SIZE / 2, minX(), maxX());
+    y = clamp(cy - SIZE / 2, minY(), groundY());
+    place(true);
+  }
+
+  function startRecall() {
+    if (paused) return;
+    leaveWater();
+    nekoEl.classList.remove("pet-mode", "drag-mode");
+    recallTarget = {
+      x: (minX() + maxX()) / 2,
+      y: groundY(),
+    };
+    onWall = null;
+    onCeiling = false;
+    setState("chase", 5000);
+    chatterMsLeft = 2000;
+    showBubble("coming!");
   }
 
   function reportBounds(force = false) {
@@ -310,18 +352,34 @@
         if (!onGround) setState("fall", 400);
         break;
       case "chase": {
-        const dx = mouseX - (x + SIZE / 2);
-        const dist = Math.hypot(dx, mouseY - (y + SIZE / 2));
+        const targetX = recallTarget ? recallTarget.x : mouseX;
+        const targetY = recallTarget ? recallTarget.y : mouseY;
+        const dx = targetX - (x + SIZE / 2);
+        const dy = targetY - (y + SIZE / 2);
+        const dist = Math.hypot(dx, dy);
         if (dist < SIZE * 0.55) {
           vx = 0;
           vy = 0;
-          setState("stand", 900);
+          if (recallTarget) {
+            recallTarget = null;
+            setState("greet", 1800);
+            chatterMsLeft = 2200;
+            showBubble("here!");
+          } else {
+            setState("stand", 900);
+          }
           break;
         }
         facingRight = dx >= 0;
         const speed = dist > 200 ? RUN_SPEED : WALK_SPEED;
         vx = facingRight ? speed : -speed;
-        vy = 0;
+        // Soft vertical nudge only when recalling (stay grounded otherwise)
+        if (recallTarget && onGround) {
+          y = groundY();
+          vy = 0;
+        } else {
+          vy = 0;
+        }
         if (!onGround) setState("fall", 400);
         break;
       }
@@ -659,8 +717,19 @@
         showBubble("good job!", { water: false });
         setState("stand", 1200);
       } else {
+        const now = performance.now();
+        const isDouble = now - lastClickAt < DOUBLE_CLICK_MS;
+        lastClickAt = now;
         leaveWater();
-        enterPet();
+        if (isDouble && onGround) {
+          setState("jump", 700);
+          vy = -12;
+          onGround = false;
+          chatterMsLeft = 1800;
+          showBubble("whee!");
+        } else {
+          enterPet();
+        }
       }
       setInteractive(false);
     } else {
@@ -742,10 +811,22 @@
       }
     });
 
-    window.nekoBridge.onDrank(() => {
+    window.nekoBridge.onSize(({ mode }) => {
+      applySize(mode);
+    });
+
+    window.nekoBridge.onRecall(() => {
+      startRecall();
+    });
+
+    window.nekoBridge.onDrank((payload) => {
       leaveWater();
+      const streak = payload?.streak;
       chatterMsLeft = 2800;
-      showBubble("nice! 💧", { water: false });
+      showBubble(
+        streak && streak > 1 ? `nice! 💧 ×${streak}` : "nice! 💧",
+        { water: false }
+      );
       if (state === "water") setState("stand", 1200);
     });
 

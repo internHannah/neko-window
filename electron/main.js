@@ -28,7 +28,10 @@ let muted = false;
 let quietHours = false;
 let openAtLogin = false;
 let animSpeed = "normal"; // slow | normal | fast
+let sizeMode = "normal"; // small | normal | large
 let lastDrinkAt = 0;
+let drinkStreak = 0;
+let lastDrinkDay = null;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
 let tooltipTimer = null;
@@ -58,6 +61,9 @@ function defaultSettings() {
     paused: false,
     animSpeed: "normal",
     lastDrinkAt: 0,
+    drinkStreak: 0,
+    lastDrinkDay: null,
+    sizeMode: "normal",
     lastX: null,
     lastY: null,
     lastDisplayId: null,
@@ -83,6 +89,11 @@ function loadSettings() {
       paused: !!raw.paused,
       animSpeed: speed,
       lastDrinkAt: Number.isFinite(raw.lastDrinkAt) ? raw.lastDrinkAt : 0,
+      drinkStreak: Number.isFinite(raw.drinkStreak) ? raw.drinkStreak : 0,
+      lastDrinkDay: typeof raw.lastDrinkDay === "string" ? raw.lastDrinkDay : null,
+      sizeMode: ["small", "normal", "large"].includes(raw.sizeMode)
+        ? raw.sizeMode
+        : defaults.sizeMode,
       lastX: Number.isFinite(raw.lastX) ? raw.lastX : null,
       lastY: Number.isFinite(raw.lastY) ? raw.lastY : null,
       lastDisplayId: Number.isFinite(raw.lastDisplayId) ? raw.lastDisplayId : null,
@@ -105,6 +116,9 @@ function saveSettings() {
         paused,
         animSpeed,
         lastDrinkAt,
+        drinkStreak,
+        lastDrinkDay,
+        sizeMode,
         lastX: hasBounds ? Math.round(nekoBounds.x) : null,
         lastY: hasBounds ? Math.round(nekoBounds.y) : null,
         lastDisplayId: lastDisplayId,
@@ -240,6 +254,7 @@ function createWindow() {
     sendWorkInsets();
     sendToNeko("neko:pause", { paused });
     sendAnimSpeed();
+    sendSizeMode();
     sendToNeko("neko:spawn", savedSpawn);
     if (!hidden) mainWindow.showInactive();
   });
@@ -415,6 +430,17 @@ function scheduleReminders(delayMs = reminderIntervalMs) {
   buildTrayMenu();
 }
 
+function dayKey(ts = Date.now()) {
+  const d = new Date(ts);
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function yesterdayKey() {
+  return dayKey(Date.now() - 24 * 60 * 60 * 1000);
+}
+
 function formatLastDrink() {
   if (!lastDrinkAt) return "never";
   const mins = Math.round((Date.now() - lastDrinkAt) / 60000);
@@ -427,9 +453,14 @@ function formatLastDrink() {
 
 function markDrankWater() {
   lastDrinkAt = Date.now();
+  const today = dayKey();
+  if (lastDrinkDay !== today) {
+    drinkStreak = lastDrinkDay === yesterdayKey() ? drinkStreak + 1 : 1;
+    lastDrinkDay = today;
+  }
   scheduleReminders();
   saveSettings();
-  sendToNeko("neko:drank", { at: lastDrinkAt });
+  sendToNeko("neko:drank", { at: lastDrinkAt, streak: drinkStreak });
   buildTrayMenu();
 }
 
@@ -442,12 +473,29 @@ function sendAnimSpeed() {
   sendToNeko("neko:speed", { multiplier: map[animSpeed] || 1, mode: animSpeed });
 }
 
+function sendSizeMode() {
+  sendToNeko("neko:size", { mode: sizeMode });
+}
+
 function setAnimSpeed(mode) {
   if (!["slow", "normal", "fast"].includes(mode)) return;
   animSpeed = mode;
   sendAnimSpeed();
   buildTrayMenu();
   saveSettings();
+}
+
+function setSizeMode(mode) {
+  if (!["small", "normal", "large"].includes(mode)) return;
+  sizeMode = mode;
+  sendSizeMode();
+  buildTrayMenu();
+  saveSettings();
+}
+
+function recallCompanion() {
+  if (hidden) setHidden(false);
+  sendToNeko("neko:recall");
 }
 
 function setPaused(next) {
@@ -515,6 +563,10 @@ function buildTrayMenu() {
       label: `Last drink: ${formatLastDrink()}`,
       enabled: false,
     },
+    {
+      label: drinkStreak > 0 ? `Streak: ${drinkStreak} day${drinkStreak === 1 ? "" : "s"}` : "Streak: start today!",
+      enabled: false,
+    },
     { type: "separator" },
     {
       label: paused ? "Resume" : "Pause",
@@ -524,6 +576,10 @@ function buildTrayMenu() {
     {
       label: hidden ? "Show companion" : "Hide companion",
       click: () => setHidden(!hidden),
+    },
+    {
+      label: "Come here",
+      click: () => recallCompanion(),
     },
     {
       label: "Drink now",
@@ -559,6 +615,19 @@ function buildTrayMenu() {
         type: "radio",
         checked: animSpeed === item.id,
         click: () => setAnimSpeed(item.id),
+      })),
+    },
+    {
+      label: "Size",
+      submenu: [
+        { id: "small", label: "Small" },
+        { id: "normal", label: "Normal" },
+        { id: "large", label: "Large" },
+      ].map((item) => ({
+        label: item.label,
+        type: "radio",
+        checked: sizeMode === item.id,
+        click: () => setSizeMode(item.id),
       })),
     },
     {
@@ -696,6 +765,12 @@ if (!gotLock) {
     paused = settings.paused;
     animSpeed = settings.animSpeed;
     lastDrinkAt = settings.lastDrinkAt;
+    drinkStreak = settings.drinkStreak || 0;
+    lastDrinkDay = settings.lastDrinkDay;
+    sizeMode = settings.sizeMode || "normal";
+    if (lastDrinkDay && lastDrinkDay !== dayKey() && lastDrinkDay !== yesterdayKey()) {
+      drinkStreak = 0;
+    }
     if (Number.isFinite(settings.lastX) && Number.isFinite(settings.lastY)) {
       savedSpawn = { x: settings.lastX, y: settings.lastY };
       nekoBounds = { ...nekoBounds, x: settings.lastX, y: settings.lastY };
