@@ -29,9 +29,12 @@ let quietHours = false;
 let openAtLogin = false;
 let animSpeed = "normal"; // slow | normal | fast
 let sizeMode = "normal"; // small | normal | large
+let followMode = false;
 let lastDrinkAt = 0;
 let drinkStreak = 0;
 let lastDrinkDay = null;
+let drinksToday = 0;
+let drinksDay = null;
 let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
 let tooltipTimer = null;
@@ -63,7 +66,10 @@ function defaultSettings() {
     lastDrinkAt: 0,
     drinkStreak: 0,
     lastDrinkDay: null,
+    drinksToday: 0,
+    drinksDay: null,
     sizeMode: "normal",
+    followMode: false,
     lastX: null,
     lastY: null,
     lastDisplayId: null,
@@ -91,9 +97,12 @@ function loadSettings() {
       lastDrinkAt: Number.isFinite(raw.lastDrinkAt) ? raw.lastDrinkAt : 0,
       drinkStreak: Number.isFinite(raw.drinkStreak) ? raw.drinkStreak : 0,
       lastDrinkDay: typeof raw.lastDrinkDay === "string" ? raw.lastDrinkDay : null,
+      drinksToday: Number.isFinite(raw.drinksToday) ? raw.drinksToday : 0,
+      drinksDay: typeof raw.drinksDay === "string" ? raw.drinksDay : null,
       sizeMode: ["small", "normal", "large"].includes(raw.sizeMode)
         ? raw.sizeMode
         : defaults.sizeMode,
+      followMode: !!raw.followMode,
       lastX: Number.isFinite(raw.lastX) ? raw.lastX : null,
       lastY: Number.isFinite(raw.lastY) ? raw.lastY : null,
       lastDisplayId: Number.isFinite(raw.lastDisplayId) ? raw.lastDisplayId : null,
@@ -118,7 +127,10 @@ function saveSettings() {
         lastDrinkAt,
         drinkStreak,
         lastDrinkDay,
+        drinksToday,
+        drinksDay,
         sizeMode,
+        followMode,
         lastX: hasBounds ? Math.round(nekoBounds.x) : null,
         lastY: hasBounds ? Math.round(nekoBounds.y) : null,
         lastDisplayId: lastDisplayId,
@@ -255,6 +267,8 @@ function createWindow() {
     sendToNeko("neko:pause", { paused });
     sendAnimSpeed();
     sendSizeMode();
+    sendFollowMode();
+    sendThirst();
     sendToNeko("neko:spawn", savedSpawn);
     if (!hidden) mainWindow.showInactive();
   });
@@ -381,9 +395,11 @@ function updateTrayTooltip() {
   ]
     .filter(Boolean)
     .join(", ");
+  const follow = followMode ? "follow" : null;
+  const allFlags = [flags, follow].filter(Boolean).join(", ");
   tray.setToolTip(
-    flags
-      ? `Doraemon · drink in ${formatCountdown(remaining)} (${flags})`
+    allFlags
+      ? `Doraemon · drink in ${formatCountdown(remaining)} (${allFlags})`
       : `Doraemon · drink in ${formatCountdown(remaining)} · every ${intervalMinutes}m`
   );
 }
@@ -427,6 +443,7 @@ function scheduleReminders(delayMs = reminderIntervalMs) {
     triggerWaterReminder();
   }, delay);
   updateTrayTooltip();
+  sendThirst();
   buildTrayMenu();
 }
 
@@ -451,16 +468,47 @@ function formatLastDrink() {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function ensureDrinksToday() {
+  const today = dayKey();
+  if (drinksDay !== today) {
+    drinksDay = today;
+    drinksToday = 0;
+  }
+}
+
+function thirstLevel() {
+  if (paused || muted) return 0;
+  if (!nextReminderAt) return 0;
+  const overdue = Date.now() - nextReminderAt;
+  if (overdue >= reminderIntervalMs * 0.5) return 2;
+  if (overdue >= 0) return 1;
+  return 0;
+}
+
+function sendThirst() {
+  sendToNeko("neko:thirst", { level: thirstLevel() });
+}
+
 function markDrankWater() {
   lastDrinkAt = Date.now();
   const today = dayKey();
+  ensureDrinksToday();
+  drinksToday += 1;
+  let milestone = false;
   if (lastDrinkDay !== today) {
     drinkStreak = lastDrinkDay === yesterdayKey() ? drinkStreak + 1 : 1;
     lastDrinkDay = today;
+    milestone = [3, 7, 14, 30].includes(drinkStreak);
   }
   scheduleReminders();
   saveSettings();
-  sendToNeko("neko:drank", { at: lastDrinkAt, streak: drinkStreak });
+  sendToNeko("neko:drank", {
+    at: lastDrinkAt,
+    streak: drinkStreak,
+    today: drinksToday,
+    milestone,
+  });
+  sendThirst();
   buildTrayMenu();
 }
 
@@ -477,6 +525,10 @@ function sendSizeMode() {
   sendToNeko("neko:size", { mode: sizeMode });
 }
 
+function sendFollowMode() {
+  sendToNeko("neko:follow", { enabled: followMode });
+}
+
 function setAnimSpeed(mode) {
   if (!["slow", "normal", "fast"].includes(mode)) return;
   animSpeed = mode;
@@ -491,6 +543,14 @@ function setSizeMode(mode) {
   sendSizeMode();
   buildTrayMenu();
   saveSettings();
+}
+
+function setFollowMode(next) {
+  followMode = !!next;
+  sendFollowMode();
+  buildTrayMenu();
+  saveSettings();
+  updateTrayTooltip();
 }
 
 function recallCompanion() {
@@ -567,6 +627,10 @@ function buildTrayMenu() {
       label: drinkStreak > 0 ? `Streak: ${drinkStreak} day${drinkStreak === 1 ? "" : "s"}` : "Streak: start today!",
       enabled: false,
     },
+    {
+      label: `Today: ${drinksToday} drink${drinksToday === 1 ? "" : "s"}`,
+      enabled: false,
+    },
     { type: "separator" },
     {
       label: paused ? "Resume" : "Pause",
@@ -579,7 +643,15 @@ function buildTrayMenu() {
     },
     {
       label: "Come here",
+      accelerator: "CmdOrCtrl+Shift+H",
       click: () => recallCompanion(),
+    },
+    {
+      label: "Follow cursor",
+      type: "checkbox",
+      checked: followMode,
+      accelerator: "CmdOrCtrl+Shift+F",
+      click: (item) => setFollowMode(item.checked),
     },
     {
       label: "Drink now",
@@ -681,6 +753,8 @@ function startTooltipRefresh() {
   if (tooltipTimer) clearInterval(tooltipTimer);
   tooltipTimer = setInterval(() => {
     updateTrayTooltip();
+    sendThirst();
+    ensureDrinksToday();
   }, TOOLTIP_REFRESH_MS);
 }
 
@@ -691,6 +765,12 @@ function registerShortcuts() {
     });
     globalShortcut.register("CommandOrControl+Shift+P", () => {
       setPaused(!paused);
+    });
+    globalShortcut.register("CommandOrControl+Shift+H", () => {
+      recallCompanion();
+    });
+    globalShortcut.register("CommandOrControl+Shift+F", () => {
+      setFollowMode(!followMode);
     });
   } catch (err) {
     console.error("[doraemon] Shortcut registration failed:", err.message);
@@ -767,10 +847,14 @@ if (!gotLock) {
     lastDrinkAt = settings.lastDrinkAt;
     drinkStreak = settings.drinkStreak || 0;
     lastDrinkDay = settings.lastDrinkDay;
+    drinksToday = settings.drinksToday || 0;
+    drinksDay = settings.drinksDay;
     sizeMode = settings.sizeMode || "normal";
+    followMode = !!settings.followMode;
     if (lastDrinkDay && lastDrinkDay !== dayKey() && lastDrinkDay !== yesterdayKey()) {
       drinkStreak = 0;
     }
+    ensureDrinksToday();
     if (Number.isFinite(settings.lastX) && Number.isFinite(settings.lastY)) {
       savedSpawn = { x: settings.lastX, y: settings.lastY };
       nekoBounds = { ...nekoBounds, x: settings.lastX, y: settings.lastY };

@@ -27,6 +27,7 @@
     day: ["hi!", "ganbatte!", "need a gadget?", "stay hydrated!", "にゃー"],
     evening: ["okaeri!", "good evening!", "rest soon?", "water before bed?"],
     night: ["zzz…", "still up?", "quiet time", "drink + sleep"],
+    thirsty: ["💧 please?", "water time!", "sip sip!", "I'm thirsty too…", "hydrate!"],
   };
   const DRAG_STATES = new Set(["drag", "resist", "drag_left", "drag_right"]);
   const STATIONARY = new Set([
@@ -50,6 +51,8 @@
   let petCount = 0;
   let lastClickAt = 0;
   let recallTarget = null;
+  let followMode = false;
+  let thirst = 0;
 
   let state = "stand";
   let paused = false;
@@ -130,19 +133,24 @@
 
   function showChatter() {
     if (state === "water" || paused) return;
-    const hour = new Date().getHours();
-    const bucket =
-      hour >= 5 && hour < 12
-        ? "morning"
-        : hour >= 12 && hour < 18
-          ? "day"
-          : hour >= 18 && hour < 22
-            ? "evening"
-            : "night";
-    const lines = CHATTER[bucket];
+    let lines;
+    if (thirst >= 1 && Math.random() < (thirst >= 2 ? 0.75 : 0.45)) {
+      lines = CHATTER.thirsty;
+    } else {
+      const hour = new Date().getHours();
+      const bucket =
+        hour >= 5 && hour < 12
+          ? "morning"
+          : hour >= 12 && hour < 18
+            ? "day"
+            : hour >= 18 && hour < 22
+              ? "evening"
+              : "night";
+      lines = CHATTER[bucket];
+    }
     const line = lines[Math.floor(Math.random() * lines.length)];
     chatterMsLeft = 3200;
-    showBubble(line, { water: false });
+    showBubble(line, { water: thirst >= 1 });
   }
 
   function applySize(mode) {
@@ -288,18 +296,27 @@
       const hour = new Date().getHours();
       const night = hour >= 22 || hour < 8;
       const sleepy = night || userIdle;
-      choices = [
-        { state: "stand", w: 110, d: [1200, 2800] },
-        { state: "sit", w: 80, d: [2000, 4500] },
-        { state: "walk", w: 120, d: [2200, 4500] },
-        { state: "run", w: 40, d: [1200, 2500] },
-        { state: "chase", w: userIdle ? 8 : mouseDist > 160 ? 90 : 35, d: [1600, 3800] },
-        { state: "sleep", w: sleepy ? 90 : 30, d: sleepy ? [6000, 12000] : [4000, 8000] },
-        { state: "jump", w: 22, d: [600, 900] },
-        { state: "fly", w: 18, d: [2000, 3500] },
-        { state: "play", w: 28, d: [1600, 3000] },
-        { state: "greet", w: 12, d: [1600, 2200] },
-      ];
+      if (followMode && !userIdle) {
+        choices = [
+          { state: "chase", w: 220, d: [2200, 5000] },
+          { state: "run", w: 40, d: [1000, 2000] },
+          { state: "stand", w: 30, d: [600, 1200] },
+          { state: "jump", w: 18, d: [600, 900] },
+        ];
+      } else {
+        choices = [
+          { state: "stand", w: thirst >= 1 ? 70 : 110, d: [1200, 2800] },
+          { state: "sit", w: thirst >= 2 ? 120 : 80, d: [2000, 4500] },
+          { state: "walk", w: 120, d: [2200, 4500] },
+          { state: "run", w: thirst >= 1 ? 20 : 40, d: [1200, 2500] },
+          { state: "chase", w: userIdle ? 8 : mouseDist > 160 ? 90 : 35, d: [1600, 3800] },
+          { state: "sleep", w: sleepy ? 90 : 30, d: sleepy ? [6000, 12000] : [4000, 8000] },
+          { state: "jump", w: 22, d: [600, 900] },
+          { state: "fly", w: 18, d: [2000, 3500] },
+          { state: "play", w: thirst >= 1 ? 12 : 28, d: [1600, 3000] },
+          { state: "greet", w: thirst >= 1 ? 28 : 12, d: [1600, 2200] },
+        ];
+      }
     } else {
       setState("fall", 400);
       return;
@@ -324,7 +341,7 @@
     }
     if (pick.state === "greet" && chatterMsLeft <= 0) {
       chatterMsLeft = 2200;
-      showBubble("hi!");
+      showBubble(thirst >= 1 ? "💧 hi… drink?" : "hi!");
     }
     setState(pick.state, randDuration(pick.d[0], pick.d[1]) / speedMul);
   }
@@ -489,7 +506,7 @@
       onCeiling = false;
       y = Math.min(y, groundY());
     }
-    showBubble("💧 drink water!", { water: true });
+    showBubble(thirst >= 2 ? "💧 please drink!" : "💧 drink water!", { water: true });
     setState("water", 5000);
     vx = 0;
     vy = 0;
@@ -562,6 +579,7 @@
       return;
     }
     nekoEl.classList.toggle("sleepy", state === "sleep");
+    nekoEl.classList.toggle("thirsty", thirst >= 1 && state !== "water");
 
     if (state === "water") {
       placeBubble();
@@ -587,7 +605,12 @@
       chatterCooldown -= dt;
       if (chatterCooldown <= 0) {
         showChatter();
-        chatterCooldown = 45000 + Math.random() * 45000;
+        chatterCooldown =
+          thirst >= 2
+            ? 14000 + Math.random() * 12000
+            : thirst >= 1
+              ? 22000 + Math.random() * 20000
+              : 45000 + Math.random() * 45000;
       }
     }
 
@@ -792,6 +815,7 @@
     });
 
     window.nekoBridge.onIdle(({ idle }) => {
+      const wasIdle = userIdle;
       userIdle = !!idle;
       if (
         userIdle &&
@@ -802,6 +826,10 @@
         state !== "pet"
       ) {
         setState("sleep", 20000);
+      } else if (wasIdle && !userIdle && !paused) {
+        if (state === "sleep") setState("greet", 1800);
+        chatterMsLeft = 2400;
+        showBubble("okaeri!");
       }
     });
 
@@ -815,18 +843,36 @@
       applySize(mode);
     });
 
+    window.nekoBridge.onFollow(({ enabled }) => {
+      followMode = !!enabled;
+      if (followMode && !paused && onGround && state !== "water" && !DRAG_STATES.has(state)) {
+        setState("chase", 4000);
+        chatterMsLeft = 1800;
+        showBubble("following!");
+      }
+    });
+
+    window.nekoBridge.onThirst(({ level }) => {
+      thirst = Math.max(0, Math.min(2, Number(level) || 0));
+      nekoEl.classList.toggle("thirsty", thirst >= 1 && state !== "water");
+    });
+
     window.nekoBridge.onRecall(() => {
       startRecall();
     });
 
     window.nekoBridge.onDrank((payload) => {
       leaveWater();
+      thirst = 0;
+      nekoEl.classList.remove("thirsty");
       const streak = payload?.streak;
-      chatterMsLeft = 2800;
-      showBubble(
-        streak && streak > 1 ? `nice! 💧 ×${streak}` : "nice! 💧",
-        { water: false }
-      );
+      const today = payload?.today;
+      chatterMsLeft = 3000;
+      let line = "nice! 💧";
+      if (payload?.milestone && streak) line = `streak ${streak}! 💧`;
+      else if (today && today > 1) line = `nice! ${today} today 💧`;
+      else if (streak && streak > 1) line = `nice! 💧 ×${streak}`;
+      showBubble(line, { water: false });
       if (state === "water") setState("stand", 1200);
     });
 

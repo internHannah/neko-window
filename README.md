@@ -21,7 +21,8 @@ Or double-click `start.cmd` (stops any previous instance first).
 | Double-click | Happy jump |
 | Drag | Pick up and throw |
 | Right-click | Open tray menu |
-| Away from mouse ~2 min | Naps |
+| Away from mouse ~2 min | Naps; says “okaeri!” when you return |
+| Overdue for water | Soft blue glow + thirsty chatter |
 
 ### Tray / shortcuts
 
@@ -29,8 +30,9 @@ Or double-click `start.cmd` (stops any previous instance first).
 |---------|----------------|
 | Pause / Resume | `Ctrl+Shift+P` |
 | Drink now | `Ctrl+Shift+D` |
-| I drank water ✓ | Logs drink, resets timer, builds streak |
-| Come here | Walks to the center of the screen |
+| Come here | `Ctrl+Shift+H` — walks to screen center |
+| Follow cursor | `Ctrl+Shift+F` — keeps chasing the pointer |
+| I drank water ✓ | Logs drink, daily count, streak milestones |
 | Snooze / Quiet hours / Mute | Reminder options |
 | Size / Animation speed | Small–Large, Slow–Fast |
 | Start with Windows | Login item |

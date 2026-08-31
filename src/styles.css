@@ -47,7 +47,15 @@ body {
   transition: opacity 0.4s ease, filter 0.4s ease;
 }
 
+#neko.thirsty {
+  filter: drop-shadow(0 0 7px #5ba3ff);
+}
+
 #neko.pet-mode {
+  filter: drop-shadow(0 0 8px #ffd54f);
+}
+
+#neko.thirsty.pet-mode {
   filter: drop-shadow(0 0 8px #ffd54f);
 }
 

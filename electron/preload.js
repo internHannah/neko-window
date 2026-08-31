@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onInsets: (handler) => on("neko:insets", handler),
   onSpeed: (handler) => on("neko:speed", handler),
   onSize: (handler) => on("neko:size", handler),
+  onFollow: (handler) => on("neko:follow", handler),
+  onThirst: (handler) => on("neko:thirst", handler),
   onDrank: (handler) => on("neko:drank", handler),
   onSpawn: (handler) => on("neko:spawn", handler),
   onIdle: (handler) => on("neko:idle", handler),
