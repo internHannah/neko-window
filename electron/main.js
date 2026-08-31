@@ -30,6 +30,7 @@ let openAtLogin = false;
 let animSpeed = "normal"; // slow | normal | fast
 let sizeMode = "normal"; // small | normal | large
 let followMode = false;
+let bestStreak = 0;
 let lastDrinkAt = 0;
 let drinkStreak = 0;
 let lastDrinkDay = null;
@@ -39,6 +40,7 @@ let reminderIntervalMs = DEFAULT_INTERVAL_MS;
 let reminderTimer = null;
 let tooltipTimer = null;
 let nextReminderAt = 0;
+let lastWaterNudgeAt = 0;
 let cursorPollTimer = null;
 let nekoBounds = { x: 0, y: 0, w: 128, h: 128 };
 let savedSpawn = null;
@@ -68,6 +70,7 @@ function defaultSettings() {
     lastDrinkDay: null,
     drinksToday: 0,
     drinksDay: null,
+    bestStreak: 0,
     sizeMode: "normal",
     followMode: false,
     lastX: null,
@@ -99,6 +102,7 @@ function loadSettings() {
       lastDrinkDay: typeof raw.lastDrinkDay === "string" ? raw.lastDrinkDay : null,
       drinksToday: Number.isFinite(raw.drinksToday) ? raw.drinksToday : 0,
       drinksDay: typeof raw.drinksDay === "string" ? raw.drinksDay : null,
+      bestStreak: Number.isFinite(raw.bestStreak) ? raw.bestStreak : 0,
       sizeMode: ["small", "normal", "large"].includes(raw.sizeMode)
         ? raw.sizeMode
         : defaults.sizeMode,
@@ -129,6 +133,7 @@ function saveSettings() {
         lastDrinkDay,
         drinksToday,
         drinksDay,
+        bestStreak,
         sizeMode,
         followMode,
         lastX: hasBounds ? Math.round(nekoBounds.x) : null,
@@ -419,13 +424,24 @@ function showWaterNotification() {
   notification.show();
 }
 
-function triggerWaterReminder({ fromTray = false } = {}) {
+function triggerWaterReminder({ fromTray = false, silent = false } = {}) {
   if (suspended) return;
   if (paused && !fromTray) return;
   if (hidden) setHidden(false);
+  lastWaterNudgeAt = Date.now();
   sendToNeko("neko:water");
-  showWaterNotification();
+  if (!silent) showWaterNotification();
   scheduleReminders(reminderIntervalMs);
+}
+
+function maybeNudgeWater() {
+  if (paused || suspended || hidden) return;
+  const level = thirstLevel();
+  if (level < 1) return;
+  const gap = level >= 2 ? 90_000 : 180_000;
+  if (Date.now() - lastWaterNudgeAt < gap) return;
+  lastWaterNudgeAt = Date.now();
+  sendToNeko("neko:water");
 }
 
 function clearReminderTimer() {
@@ -478,10 +494,13 @@ function ensureDrinksToday() {
 
 function thirstLevel() {
   if (paused || muted) return 0;
-  if (!nextReminderAt) return 0;
-  const overdue = Date.now() - nextReminderAt;
-  if (overdue >= reminderIntervalMs * 0.5) return 2;
-  if (overdue >= 0) return 1;
+  if (!lastDrinkAt) {
+    if (!nextReminderAt || Date.now() < nextReminderAt) return 0;
+    return 1;
+  }
+  const since = Date.now() - lastDrinkAt;
+  if (since >= reminderIntervalMs * 1.5) return 2;
+  if (since >= reminderIntervalMs) return 1;
   return 0;
 }
 
@@ -500,12 +519,14 @@ function markDrankWater() {
     lastDrinkDay = today;
     milestone = [3, 7, 14, 30].includes(drinkStreak);
   }
+  if (drinkStreak > bestStreak) bestStreak = drinkStreak;
   scheduleReminders();
   saveSettings();
   sendToNeko("neko:drank", {
     at: lastDrinkAt,
     streak: drinkStreak,
     today: drinksToday,
+    best: bestStreak,
     milestone,
   });
   sendThirst();
@@ -628,6 +649,10 @@ function buildTrayMenu() {
       enabled: false,
     },
     {
+      label: bestStreak > 0 ? `Best streak: ${bestStreak} day${bestStreak === 1 ? "" : "s"}` : "Best streak: —",
+      enabled: false,
+    },
+    {
       label: `Today: ${drinksToday} drink${drinksToday === 1 ? "" : "s"}`,
       enabled: false,
     },
@@ -664,6 +689,7 @@ function buildTrayMenu() {
     },
     {
       label: "Snooze 10 minutes",
+      accelerator: "CmdOrCtrl+Shift+S",
       click: () => snoozeReminders(10),
     },
     { type: "separator" },
@@ -755,6 +781,7 @@ function startTooltipRefresh() {
     updateTrayTooltip();
     sendThirst();
     ensureDrinksToday();
+    maybeNudgeWater();
   }, TOOLTIP_REFRESH_MS);
 }
 
@@ -771,6 +798,9 @@ function registerShortcuts() {
     });
     globalShortcut.register("CommandOrControl+Shift+F", () => {
       setFollowMode(!followMode);
+    });
+    globalShortcut.register("CommandOrControl+Shift+S", () => {
+      snoozeReminders(10);
     });
   } catch (err) {
     console.error("[doraemon] Shortcut registration failed:", err.message);
@@ -849,11 +879,13 @@ if (!gotLock) {
     lastDrinkDay = settings.lastDrinkDay;
     drinksToday = settings.drinksToday || 0;
     drinksDay = settings.drinksDay;
+    bestStreak = settings.bestStreak || 0;
     sizeMode = settings.sizeMode || "normal";
     followMode = !!settings.followMode;
     if (lastDrinkDay && lastDrinkDay !== dayKey() && lastDrinkDay !== yesterdayKey()) {
       drinkStreak = 0;
     }
+    if (drinkStreak > bestStreak) bestStreak = drinkStreak;
     ensureDrinksToday();
     if (Number.isFinite(settings.lastX) && Number.isFinite(settings.lastY)) {
       savedSpawn = { x: settings.lastX, y: settings.lastY };

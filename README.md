@@ -15,14 +15,16 @@ Or double-click `start.cmd` (stops any previous instance first).
 
 | Action | What happens |
 |--------|----------------|
-| Autonomously | Walk, run, chase, sit, sleep, climb, fall, greet, play |
+| Autonomously | Walk/patrol, run, chase, sit, sleep, climb, fall, greet, play |
 | Move near while sleeping | Wakes up |
 | Click | Pet |
 | Double-click | Happy jump |
+| Middle-click | Snooze reminders 10 minutes |
+| Click water bubble | Log that you drank |
 | Drag | Pick up and throw |
 | Right-click | Open tray menu |
 | Away from mouse ~2 min | Naps; says “okaeri!” when you return |
-| Overdue for water | Soft blue glow + thirsty chatter |
+| Overdue for water | Soft blue glow, thirsty chatter, gentle re-nudges |
 
 ### Tray / shortcuts
 
@@ -32,8 +34,9 @@ Or double-click `start.cmd` (stops any previous instance first).
 | Drink now | `Ctrl+Shift+D` |
 | Come here | `Ctrl+Shift+H` — walks to screen center |
 | Follow cursor | `Ctrl+Shift+F` — keeps chasing the pointer |
-| I drank water ✓ | Logs drink, daily count, streak milestones |
-| Snooze / Quiet hours / Mute | Reminder options |
+| Snooze 10 minutes | `Ctrl+Shift+S` |
+| I drank water ✓ | Logs drink, daily count, streak / best streak |
+| Quiet hours / Mute | Reminder options |
 | Size / Animation speed | Small–Large, Slow–Fast |
 | Start with Windows | Login item |
 

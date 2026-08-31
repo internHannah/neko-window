@@ -20,6 +20,7 @@ body {
   cursor: grab;
   z-index: 2;
   transform-origin: center bottom;
+  transition: width 0.2s ease, height 0.2s ease;
 }
 
 #neko.flip #sprite {
@@ -34,6 +35,7 @@ body {
   display: block;
   user-select: none;
   -webkit-user-drag: none;
+  transition: width 0.2s ease, height 0.2s ease;
 }
 
 #neko.water-mode {
@@ -96,6 +98,8 @@ body {
 #bubble.water {
   background: rgba(230, 242, 255, 0.96);
   color: #1a5fd4;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 #bubble.hidden {

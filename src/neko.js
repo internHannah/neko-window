@@ -51,6 +51,7 @@
   let petCount = 0;
   let lastClickAt = 0;
   let recallTarget = null;
+  let patrolTarget = null;
   let followMode = false;
   let thirst = 0;
 
@@ -167,10 +168,24 @@
     place(true);
   }
 
+  function pickPatrolTarget() {
+    const span = Math.max(40, maxX() - minX());
+    let tx = minX() + SIZE / 2 + Math.random() * span;
+    if (Math.abs(tx - (x + SIZE / 2)) < SIZE) {
+      tx = clamp(
+        tx + (facingRight ? SIZE * 2 : -SIZE * 2),
+        minX() + SIZE / 2,
+        maxX() + SIZE / 2
+      );
+    }
+    patrolTarget = { x: tx };
+  }
+
   function startRecall() {
     if (paused) return;
     leaveWater();
     nekoEl.classList.remove("pet-mode", "drag-mode");
+    patrolTarget = null;
     recallTarget = {
       x: (minX() + maxX()) / 2,
       y: groundY(),
@@ -323,8 +338,14 @@
     }
 
     const pick = pickWeighted(choices);
-    if (pick.state === "walk" || pick.state === "run" || pick.state === "fly") {
+    if (pick.state === "walk" || pick.state === "run") {
+      pickPatrolTarget();
+      if (Math.random() < 0.2) facingRight = !facingRight;
+    } else if (pick.state === "fly") {
+      patrolTarget = null;
       if (Math.random() < 0.35) facingRight = !facingRight;
+    } else {
+      patrolTarget = null;
     }
     if (pick.state === "jump" && onGround) {
       vy = -11;
@@ -359,15 +380,24 @@
 
     switch (state) {
       case "walk":
-        vx = facingRight ? WALK_SPEED : -WALK_SPEED;
+      case "run": {
+        const speed = state === "run" ? RUN_SPEED : WALK_SPEED;
+        if (patrolTarget) {
+          const dx = patrolTarget.x - (x + SIZE / 2);
+          if (Math.abs(dx) < 14) {
+            patrolTarget = null;
+            vx = 0;
+            vy = 0;
+            setState("stand", 700);
+            break;
+          }
+          facingRight = dx >= 0;
+        }
+        vx = facingRight ? speed : -speed;
         vy = 0;
         if (!onGround) setState("fall", 400);
         break;
-      case "run":
-        vx = facingRight ? RUN_SPEED : -RUN_SPEED;
-        vy = 0;
-        if (!onGround) setState("fall", 400);
-        break;
+      }
       case "chase": {
         const targetX = recallTarget ? recallTarget.x : mouseX;
         const targetY = recallTarget ? recallTarget.y : mouseY;
@@ -510,11 +540,13 @@
     setState("water", 5000);
     vx = 0;
     vy = 0;
+    setInteractive(true);
   }
 
   function leaveWater() {
     waterMsLeft = 0;
     nekoEl.classList.remove("water-mode");
+    setInteractive(false);
     if (chatterMsLeft <= 0) {
       bubbleEl.classList.add("hidden");
       bubbleEl.classList.remove("water");
@@ -760,6 +792,24 @@
     }
   }
 
+  bubbleEl.addEventListener("click", (event) => {
+    if (!bubbleEl.classList.contains("water") || paused) return;
+    event.stopPropagation();
+    leaveWater();
+    window.nekoBridge?.drankWater();
+    chatterMsLeft = 2500;
+    showBubble("good job!", { water: false });
+    setState("stand", 1200);
+  });
+
+  nekoEl.addEventListener("auxclick", (event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    window.nekoBridge?.snooze(10);
+    chatterMsLeft = 2200;
+    showBubble("snoozed 10m");
+  });
+
   nekoEl.addEventListener("pointerdown", onPointerDown);
   document.addEventListener("pointermove", onPointerMove);
   document.addEventListener("pointerup", onPointerUp);
@@ -870,6 +920,7 @@
       chatterMsLeft = 3000;
       let line = "nice! 💧";
       if (payload?.milestone && streak) line = `streak ${streak}! 💧`;
+      else if (payload?.best && streak && streak >= payload.best && streak > 1) line = `best ${streak}! 💧`;
       else if (today && today > 1) line = `nice! ${today} today 💧`;
       else if (streak && streak > 1) line = `nice! 💧 ×${streak}`;
       showBubble(line, { water: false });
