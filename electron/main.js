@@ -12,6 +12,13 @@ const {
 } = require("electron");
 const fs = require("fs");
 const path = require("path");
+const {
+  HABITS,
+  defaultHabitState,
+  normalizeHabitState,
+  nextHabitDue,
+  habitsDoneCount,
+} = require("./habits");
 
 const DEFAULT_INTERVAL_MS = 45 * 60 * 1000;
 const CURSOR_POLL_MS = 32;
@@ -55,6 +62,10 @@ let ignoringMouse = true;
 let lastCursor = { x: Number.NaN, y: Number.NaN };
 let settingsPath = null;
 let suspended = false;
+let habitState = defaultHabitState();
+let habitTimer = null;
+let nextHabitAt = 0;
+let pendingHabitId = null;
 
 function defaultSettings() {
   return {
@@ -76,6 +87,7 @@ function defaultSettings() {
     lastX: null,
     lastY: null,
     lastDisplayId: null,
+    habits: defaultHabitState(),
   };
 }
 
@@ -110,6 +122,7 @@ function loadSettings() {
       lastX: Number.isFinite(raw.lastX) ? raw.lastX : null,
       lastY: Number.isFinite(raw.lastY) ? raw.lastY : null,
       lastDisplayId: Number.isFinite(raw.lastDisplayId) ? raw.lastDisplayId : null,
+      habits: normalizeHabitState(raw.habits),
     };
   } catch {
     return defaults;
@@ -139,6 +152,7 @@ function saveSettings() {
         lastX: hasBounds ? Math.round(nekoBounds.x) : null,
         lastY: hasBounds ? Math.round(nekoBounds.y) : null,
         lastDisplayId: lastDisplayId,
+        habits: habitState,
       },
       null,
       2
@@ -394,17 +408,19 @@ function updateTrayTooltip() {
     return;
   }
   const remaining = nextReminderAt - Date.now();
+  const { done, total } = habitsDoneCount(habitState, dayKey);
+  const goals = total ? `goals ${done}/${total}` : null;
   const flags = [
     muted ? "muted" : null,
     isQuietHourNow() ? "quiet hours" : null,
+    followMode ? "follow" : null,
+    goals,
   ]
     .filter(Boolean)
     .join(", ");
-  const follow = followMode ? "follow" : null;
-  const allFlags = [flags, follow].filter(Boolean).join(", ");
   tray.setToolTip(
-    allFlags
-      ? `Doraemon · drink in ${formatCountdown(remaining)} (${allFlags})`
+    flags
+      ? `Doraemon · drink in ${formatCountdown(remaining)} (${flags})`
       : `Doraemon · drink in ${formatCountdown(remaining)} · every ${intervalMinutes}m`
   );
 }
@@ -582,8 +598,10 @@ function recallCompanion() {
 function setPaused(next) {
   paused = next;
   sendToNeko("neko:pause", { paused });
-  if (!paused) scheduleReminders();
-  else updateTrayTooltip();
+  if (!paused) {
+    scheduleReminders();
+    scheduleHabits();
+  } else updateTrayTooltip();
   if (!hidden) startCursorPoll();
   buildTrayMenu();
   saveSettings();
@@ -626,6 +644,82 @@ function setReminderMinutes(minutes) {
   reminderIntervalMs = minutes * 60 * 1000;
   scheduleReminders();
   saveSettings();
+}
+
+function clearHabitTimer() {
+  if (habitTimer) {
+    clearTimeout(habitTimer);
+    habitTimer = null;
+  }
+}
+
+function showHabitNotification(habit) {
+  if (muted || isQuietHourNow() || !Notification.isSupported()) return;
+  const iconPath = path.join(__dirname, "..", "assets", "dora-sprites", "icon.png");
+  const notification = new Notification({
+    title: "Doraemon · Daily goal",
+    body: habit.toast,
+    silent: false,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+  });
+  notification.on("click", () => setHidden(false));
+  notification.show();
+}
+
+function triggerHabitReminder(habit, { fromTray = false } = {}) {
+  if (!habit) return;
+  if (suspended) return;
+  if (paused && !fromTray) return;
+  if (hidden) setHidden(false);
+  pendingHabitId = habit.id;
+  sendToNeko("neko:habit", {
+    id: habit.id,
+    label: habit.label,
+    message: habit.message,
+  });
+  showHabitNotification(habit);
+  scheduleHabits();
+  buildTrayMenu();
+}
+
+function markHabitDone(id) {
+  const habit = HABITS.find((h) => h.id === id);
+  if (!habit) return;
+  habitState.done[id] = dayKey();
+  if (pendingHabitId === id) pendingHabitId = null;
+  saveSettings();
+  sendToNeko("neko:habit-done", { id, label: habit.label });
+  scheduleHabits();
+  buildTrayMenu();
+  updateTrayTooltip();
+}
+
+function setHabitEnabled(id, enabled) {
+  if (!Object.prototype.hasOwnProperty.call(habitState.enabled, id)) return;
+  habitState.enabled[id] = !!enabled;
+  saveSettings();
+  scheduleHabits();
+  buildTrayMenu();
+}
+
+function scheduleHabits() {
+  clearHabitTimer();
+  const next = nextHabitDue(habitState, dayKey);
+  if (!next) {
+    nextHabitAt = 0;
+    return;
+  }
+  nextHabitAt = next.at;
+  const delay = Math.max(2_000, next.at - Date.now());
+  habitTimer = setTimeout(() => {
+    const today = dayKey();
+    if (habitState.done[next.habit.id] === today) {
+      scheduleHabits();
+      return;
+    }
+    triggerHabitReminder(next.habit);
+  }, delay);
+  updateTrayTooltip();
 }
 
 function buildTrayMenu() {
@@ -691,6 +785,46 @@ function buildTrayMenu() {
       label: "Snooze 10 minutes",
       accelerator: "CmdOrCtrl+Shift+S",
       click: () => snoozeReminders(10),
+    },
+    {
+      label: (() => {
+        const { done, total } = habitsDoneCount(habitState, dayKey);
+        return `Daily goals (${done}/${total})`;
+      })(),
+      submenu: [
+        ...HABITS.map((h) => {
+          const today = dayKey();
+          const done = habitState.done[h.id] === today;
+          return {
+            label: done ? `✓ ${h.label}` : h.label,
+            type: "checkbox",
+            checked: done,
+            enabled: habitState.enabled[h.id],
+            click: () => {
+              if (habitState.done[h.id] === dayKey()) {
+                habitState.done[h.id] = null;
+                saveSettings();
+                scheduleHabits();
+                buildTrayMenu();
+              } else {
+                markHabitDone(h.id);
+              }
+            },
+          };
+        }),
+        { type: "separator" },
+        ...HABITS.map((h) => ({
+          label: `Remind: ${h.label}`,
+          click: () => triggerHabitReminder(h, { fromTray: true }),
+        })),
+        { type: "separator" },
+        ...HABITS.map((h) => ({
+          label: `Enable ${h.label}`,
+          type: "checkbox",
+          checked: habitState.enabled[h.id],
+          click: (item) => setHabitEnabled(h.id, item.checked),
+        })),
+      ],
     },
     { type: "separator" },
     {
@@ -844,6 +978,10 @@ function registerIpc() {
     markDrankWater();
   });
 
+  ipcMain.on("neko:habit-done", (_event, id) => {
+    if (typeof id === "string") markHabitDone(id);
+  });
+
   ipcMain.on("neko:menu", () => {
     buildTrayMenu();
     if (!tray || !trayMenu) return;
@@ -882,6 +1020,7 @@ if (!gotLock) {
     bestStreak = settings.bestStreak || 0;
     sizeMode = settings.sizeMode || "normal";
     followMode = !!settings.followMode;
+    habitState = normalizeHabitState(settings.habits);
     if (lastDrinkDay && lastDrinkDay !== dayKey() && lastDrinkDay !== yesterdayKey()) {
       drinkStreak = 0;
     }
@@ -901,6 +1040,7 @@ if (!gotLock) {
     createTray();
     if (paused) updateTrayTooltip();
     else scheduleReminders();
+    scheduleHabits();
     startCursorPoll();
     startTooltipRefresh();
     registerIpc();
@@ -910,18 +1050,26 @@ if (!gotLock) {
     powerMonitor.on("suspend", () => {
       suspended = true;
       clearReminderTimer();
+    clearHabitTimer();
     });
     powerMonitor.on("resume", () => {
       suspended = false;
-      if (!paused) scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+      if (!paused) {
+      scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+      scheduleHabits();
+    }
     });
     powerMonitor.on("lock-screen", () => {
       suspended = true;
       clearReminderTimer();
+    clearHabitTimer();
     });
     powerMonitor.on("unlock-screen", () => {
       suspended = false;
-      if (!paused) scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+      if (!paused) {
+      scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+      scheduleHabits();
+    }
     });
 
     screen.on("display-metrics-changed", fitWindowToDisplay);
@@ -940,6 +1088,7 @@ if (!gotLock) {
   app.on("before-quit", () => {
     saveSettings();
     clearReminderTimer();
+    clearHabitTimer();
     stopCursorPoll();
     if (tooltipTimer) {
       clearInterval(tooltipTimer);

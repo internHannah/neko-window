@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   onSpawn: (handler) => on("neko:spawn", handler),
   onIdle: (handler) => on("neko:idle", handler),
   onRecall: (handler) => on("neko:recall", () => handler()),
+  onHabit: (handler) => on("neko:habit", handler),
+  onHabitDone: (handler) => on("neko:habit-done", handler),
   reportBounds: (bounds) => {
     ipcRenderer.send("neko:bounds", bounds);
   },
@@ -33,6 +35,9 @@ contextBridge.exposeInMainWorld("nekoBridge", {
   },
   drankWater: () => {
     ipcRenderer.send("neko:drank");
+  },
+  habitDone: (id) => {
+    ipcRenderer.send("neko:habit-done", id);
   },
   openMenu: () => {
     ipcRenderer.send("neko:menu");

@@ -102,6 +102,14 @@ body {
   cursor: pointer;
 }
 
+#bubble.habit {
+  background: rgba(255, 248, 230, 0.96);
+  color: #8a5a10;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(180, 120, 40, 0.22);
+}
+
 #bubble.hidden {
   display: none;
 }

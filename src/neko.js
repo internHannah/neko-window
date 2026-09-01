@@ -54,6 +54,8 @@
   let patrolTarget = null;
   let followMode = false;
   let thirst = 0;
+  let pendingHabitId = null;
+  let habitMsLeft = 0;
 
   let state = "stand";
   let paused = false;
@@ -129,7 +131,7 @@
   function hideBubble() {
     if (state === "water" || chatterMsLeft > 0) return;
     bubbleEl.classList.add("hidden");
-    bubbleEl.classList.remove("water", "pop");
+    bubbleEl.classList.remove("water", "habit", "pop");
   }
 
   function showChatter() {
@@ -527,6 +529,37 @@
     }
   }
 
+  function clearHabitPrompt() {
+    habitMsLeft = 0;
+    pendingHabitId = null;
+    bubbleEl.classList.remove("habit");
+    if (state !== "water") setInteractive(false);
+    if (chatterMsLeft <= 0 && state !== "water") {
+      bubbleEl.classList.add("hidden");
+      bubbleEl.classList.remove("pop");
+    }
+  }
+
+  function enterHabit(payload) {
+    if (!payload || !payload.id) return;
+    leaveWater();
+    pendingHabitId = payload.id;
+    habitMsLeft = 12000;
+    chatterMsLeft = 0;
+    showBubble(payload.message || payload.label || "daily goal!", { habit: true });
+    setState("greet", 2500);
+    setInteractive(true);
+  }
+
+  function completeHabitFromBubble() {
+    if (!pendingHabitId || paused) return;
+    const id = pendingHabitId;
+    clearHabitPrompt();
+    window.nekoBridge?.habitDone(id);
+    chatterMsLeft = 2600;
+    showBubble("nice work!");
+    setState("play", 1600);
+  }
   function enterWater() {
     waterMsLeft = 5000;
     chatterMsLeft = 0;
@@ -945,6 +978,17 @@
       if (didDrag || DRAG_STATES.has(state)) return;
       leaveWater();
       enterWater();
+    });
+
+    window.nekoBridge.onHabit((payload) => {
+      if (didDrag || DRAG_STATES.has(state)) return;
+      enterHabit(payload);
+    });
+
+    window.nekoBridge.onHabitDone((payload) => {
+      if (pendingHabitId && payload?.id === pendingHabitId) clearHabitPrompt();
+      chatterMsLeft = 2400;
+      showBubble(payload?.label ? `✓ ${payload.label}` : "✓ done!");
     });
   }
 
