@@ -9,11 +9,14 @@ const {
   screen,
   globalShortcut,
   powerMonitor,
+  shell,
 } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const {
-  HABITS,
+  getHabits,
+  getHabitOptions,
+  loadHabitsConfig,
   defaultHabitState,
   normalizeHabitState,
   nextHabitDue,
@@ -654,11 +657,13 @@ function clearHabitTimer() {
 }
 
 function showHabitNotification(habit) {
+  const opts = getHabitOptions();
+  if (!opts.systemNotifications) return;
   if (muted || isQuietHourNow() || !Notification.isSupported()) return;
   const iconPath = path.join(__dirname, "..", "assets", "dora-sprites", "icon.png");
   const notification = new Notification({
     title: "Doraemon · Daily goal",
-    body: habit.toast,
+    body: habit.message || habit.label,
     silent: false,
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
   });
@@ -666,26 +671,58 @@ function showHabitNotification(habit) {
   notification.show();
 }
 
-function triggerHabitReminder(habit, { fromTray = false } = {}) {
+async function openHabitSite(habit) {
+  const opts = getHabitOptions();
+  if (!opts.openBrowser || !habit?.url) return false;
+  try {
+    await shell.openExternal(habit.url);
+    return true;
+  } catch (err) {
+    console.error("[doraemon] Failed to open habit URL:", habit.url, err.message);
+    return false;
+  }
+}
+
+function triggerHabitReminder(habit, { fromTray = false, reopen = false, openSite = true } = {}) {
   if (!habit) return;
   if (suspended) return;
   if (paused && !fromTray) return;
   if (hidden) setHidden(false);
+
+  const today = dayKey();
+  if (!reopen && habitState.reminded[habit.id] === today && !fromTray) {
+    scheduleHabits();
+    return;
+  }
+
+  habitState.reminded[habit.id] = today;
   pendingHabitId = habit.id;
-  sendToNeko("neko:habit", {
-    id: habit.id,
-    label: habit.label,
-    message: habit.message,
+  saveSettings();
+
+  const shouldOpen = reopen || fromTray || openSite;
+  const opener = shouldOpen ? openHabitSite(habit) : Promise.resolve(false);
+  opener.then((opened) => {
+    sendToNeko("neko:habit", {
+      id: habit.id,
+      label: habit.label,
+      message: opened
+        ? habit.message || `${habit.label} — site opened!`
+        : `${habit.label} — click me when done`,
+      url: habit.url || null,
+      opened,
+    });
   });
+
   showHabitNotification(habit);
   scheduleHabits();
   buildTrayMenu();
 }
 
 function markHabitDone(id) {
-  const habit = HABITS.find((h) => h.id === id);
+  const habit = getHabits().find((h) => h.id === id);
   if (!habit) return;
   habitState.done[id] = dayKey();
+  habitState.reminded[id] = dayKey();
   if (pendingHabitId === id) pendingHabitId = null;
   saveSettings();
   sendToNeko("neko:habit-done", { id, label: habit.label });
@@ -717,7 +754,7 @@ function scheduleHabits() {
       scheduleHabits();
       return;
     }
-    triggerHabitReminder(next.habit);
+    triggerHabitReminder(next.habit, { openSite: !next.overdue });
   }, delay);
   updateTrayTooltip();
 }
@@ -792,7 +829,7 @@ function buildTrayMenu() {
         return `Daily goals (${done}/${total})`;
       })(),
       submenu: [
-        ...HABITS.map((h) => {
+        ...getHabits().map((h) => {
           const today = dayKey();
           const done = habitState.done[h.id] === today;
           return {
@@ -803,6 +840,7 @@ function buildTrayMenu() {
             click: () => {
               if (habitState.done[h.id] === dayKey()) {
                 habitState.done[h.id] = null;
+                habitState.reminded[h.id] = null;
                 saveSettings();
                 scheduleHabits();
                 buildTrayMenu();
@@ -813,12 +851,12 @@ function buildTrayMenu() {
           };
         }),
         { type: "separator" },
-        ...HABITS.map((h) => ({
-          label: `Remind: ${h.label}`,
-          click: () => triggerHabitReminder(h, { fromTray: true }),
+        ...getHabits().map((h) => ({
+          label: `Open: ${h.label}`,
+          click: () => triggerHabitReminder(h, { fromTray: true, reopen: true }),
         })),
         { type: "separator" },
-        ...HABITS.map((h) => ({
+        ...getHabits().map((h) => ({
           label: `Enable ${h.label}`,
           type: "checkbox",
           checked: habitState.enabled[h.id],
@@ -1005,6 +1043,10 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     settingsPath = path.join(app.getPath("userData"), "settings.json");
+    loadHabitsConfig([
+      path.join(app.getPath("userData"), "habits.json"),
+      path.join(__dirname, "..", "habits.json"),
+    ]);
     const settings = loadSettings();
     reminderIntervalMs = settings.reminderMinutes * 60 * 1000;
     muted = settings.muted;

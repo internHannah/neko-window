@@ -118,9 +118,10 @@
     return insets.top;
   }
 
-  function showBubble(text, { water = false } = {}) {
+  function showBubble(text, { water = false, habit = false } = {}) {
     bubbleEl.textContent = text;
     bubbleEl.classList.toggle("water", water);
+    bubbleEl.classList.toggle("habit", habit);
     bubbleEl.classList.remove("hidden");
     bubbleEl.classList.remove("pop");
     void bubbleEl.offsetWidth;
@@ -129,7 +130,7 @@
   }
 
   function hideBubble() {
-    if (state === "water" || chatterMsLeft > 0) return;
+    if (state === "water" || chatterMsLeft > 0 || habitMsLeft > 0) return;
     bubbleEl.classList.add("hidden");
     bubbleEl.classList.remove("water", "habit", "pop");
   }
@@ -544,7 +545,7 @@
     if (!payload || !payload.id) return;
     leaveWater();
     pendingHabitId = payload.id;
-    habitMsLeft = 12000;
+    habitMsLeft = 28000;
     chatterMsLeft = 0;
     showBubble(payload.message || payload.label || "daily goal!", { habit: true });
     setState("greet", 2500);
@@ -556,9 +557,6 @@
     const id = pendingHabitId;
     clearHabitPrompt();
     window.nekoBridge?.habitDone(id);
-    chatterMsLeft = 2600;
-    showBubble("nice work!");
-    setState("play", 1600);
   }
   function enterWater() {
     waterMsLeft = 5000;
@@ -658,10 +656,18 @@
       return;
     }
 
+    if (habitMsLeft > 0) {
+      habitMsLeft -= dt;
+      placeBubble();
+      if (habitMsLeft <= 0) clearHabitPrompt();
+    }
+
     if (chatterMsLeft > 0) {
       chatterMsLeft -= dt;
       placeBubble();
       if (chatterMsLeft <= 0) hideBubble();
+    } else if (habitMsLeft > 0) {
+      placeBubble();
     } else if (
       !paused &&
       onGround &&
@@ -804,6 +810,8 @@
         chatterMsLeft = 2500;
         showBubble("good job!", { water: false });
         setState("stand", 1200);
+      } else if (pendingHabitId) {
+        completeHabitFromBubble();
       } else {
         const now = performance.now();
         const isDouble = now - lastClickAt < DOUBLE_CLICK_MS;
@@ -826,7 +834,13 @@
   }
 
   bubbleEl.addEventListener("click", (event) => {
-    if (!bubbleEl.classList.contains("water") || paused) return;
+    if (paused) return;
+    if (bubbleEl.classList.contains("habit") && pendingHabitId) {
+      event.stopPropagation();
+      completeHabitFromBubble();
+      return;
+    }
+    if (!bubbleEl.classList.contains("water")) return;
     event.stopPropagation();
     leaveWater();
     window.nekoBridge?.drankWater();
@@ -981,7 +995,10 @@
     });
 
     window.nekoBridge.onHabit((payload) => {
-      if (didDrag || DRAG_STATES.has(state)) return;
+      if (didDrag || DRAG_STATES.has(state)) {
+        setTimeout(() => enterHabit(payload), 800);
+        return;
+      }
       enterHabit(payload);
     });
 

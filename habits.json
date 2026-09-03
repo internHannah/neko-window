@@ -1,0 +1,38 @@
+{
+  "systemNotifications": false,
+  "openBrowser": true,
+  "habits": [
+    {
+      "id": "grind75",
+      "label": "Grind 75",
+      "hour": 10,
+      "minute": 0,
+      "url": "https://www.techinterviewhandbook.org/grind75",
+      "message": "Grind 75 — opened your practice site!"
+    },
+    {
+      "id": "jobs",
+      "label": "Apply for jobs",
+      "hour": 13,
+      "minute": 0,
+      "url": "https://www.linkedin.com/jobs/",
+      "message": "Job apps — opened LinkedIn Jobs!"
+    },
+    {
+      "id": "hsk3",
+      "label": "HSK 3 study",
+      "hour": 17,
+      "minute": 0,
+      "url": "https://www.dong-chinese.com/",
+      "message": "HSK 3 — opened your Chinese study site!"
+    },
+    {
+      "id": "aws",
+      "label": "AWS SAA study",
+      "hour": 20,
+      "minute": 0,
+      "url": "https://learn.cantrill.io/",
+      "message": "AWS SAA — opened your study site!"
+    }
+  ]
+}
