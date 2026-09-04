@@ -2,12 +2,15 @@
 const fs = require("fs");
 const path = require("path");
 
+const WEEKDAYS = [1, 2, 3, 4, 5];
+
 const DEFAULT_HABITS = [
   {
     id: "grind75",
     label: "Grind 75",
     hour: 10,
     minute: 0,
+    days: WEEKDAYS,
     url: "https://www.techinterviewhandbook.org/grind75",
     message: "Grind 75 — opened your practice site!",
   },
@@ -16,6 +19,7 @@ const DEFAULT_HABITS = [
     label: "Apply for jobs",
     hour: 13,
     minute: 0,
+    days: WEEKDAYS,
     url: "https://www.linkedin.com/jobs/",
     message: "Job apps — opened LinkedIn Jobs!",
   },
@@ -24,6 +28,7 @@ const DEFAULT_HABITS = [
     label: "HSK 3 study",
     hour: 17,
     minute: 0,
+    days: WEEKDAYS,
     url: "https://www.dong-chinese.com/",
     message: "HSK 3 — opened your Chinese study site!",
   },
@@ -32,13 +37,14 @@ const DEFAULT_HABITS = [
     label: "AWS SAA study",
     hour: 20,
     minute: 0,
+    days: WEEKDAYS,
     url: "https://learn.cantrill.io/",
     message: "AWS SAA — opened your study site!",
   },
 ];
 
 /** @type {typeof DEFAULT_HABITS} */
-let HABITS = DEFAULT_HABITS.map((h) => ({ ...h }));
+let HABITS = DEFAULT_HABITS.map((h) => ({ ...h, days: [...h.days] }));
 let openBrowser = true;
 let systemNotifications = false;
 
@@ -50,6 +56,19 @@ function isHttpUrl(value) {
   } catch {
     return false;
   }
+}
+
+/** 0 = Sunday … 6 = Saturday. Missing/invalid lists default to weekdays. */
+function normalizeDays(raw, fallback) {
+  const source = Array.isArray(raw) ? raw : Array.isArray(fallback) ? fallback : WEEKDAYS;
+  const days = [
+    ...new Set(
+      source
+        .map((d) => (Number.isFinite(d) ? Math.floor(Number(d)) : NaN))
+        .filter((d) => d >= 0 && d <= 6)
+    ),
+  ].sort((a, b) => a - b);
+  return days.length ? days : WEEKDAYS.slice();
 }
 
 function normalizeHabitEntry(raw, fallback) {
@@ -66,6 +85,7 @@ function normalizeHabitEntry(raw, fallback) {
     label: typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : base.label || id,
     hour,
     minute,
+    days: normalizeDays(raw.days, base.days),
     url,
     message:
       typeof raw.message === "string" && raw.message.trim()
@@ -74,12 +94,30 @@ function normalizeHabitEntry(raw, fallback) {
   };
 }
 
+function nextFutureSlot(habit, now) {
+  const start = new Date(now);
+  const days = Array.isArray(habit.days) && habit.days.length ? habit.days : WEEKDAYS;
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate() + i,
+      habit.hour,
+      habit.minute,
+      0,
+      0
+    );
+    if (days.includes(d.getDay())) return d.getTime();
+  }
+  return now + 24 * 60 * 60 * 1000;
+}
+
 function applyConfig(raw) {
   openBrowser = raw.openBrowser !== false;
   systemNotifications = !!raw.systemNotifications;
 
   if (!Array.isArray(raw.habits) || raw.habits.length === 0) {
-    HABITS = DEFAULT_HABITS.map((h) => ({ ...h }));
+    HABITS = DEFAULT_HABITS.map((h) => ({ ...h, days: [...h.days] }));
     return;
   }
 
@@ -93,14 +131,11 @@ function applyConfig(raw) {
     seen.add(normalized.id);
     next.push(normalized);
   }
-  HABITS = next.length ? next : DEFAULT_HABITS.map((h) => ({ ...h }));
+  HABITS = next.length ? next : DEFAULT_HABITS.map((h) => ({ ...h, days: [...h.days] }));
 }
 
 function loadHabitsConfig(extraPaths = []) {
-  const candidates = [
-    ...extraPaths,
-    path.join(__dirname, "..", "habits.json"),
-  ].filter(Boolean);
+  const candidates = [...extraPaths, path.join(__dirname, "..", "habits.json")].filter(Boolean);
 
   for (const file of candidates) {
     try {
@@ -113,13 +148,12 @@ function loadHabitsConfig(extraPaths = []) {
     }
   }
 
-  HABITS = DEFAULT_HABITS.map((h) => ({ ...h }));
+  HABITS = DEFAULT_HABITS.map((h) => ({ ...h, days: [...h.days] }));
   openBrowser = true;
   systemNotifications = false;
   return null;
 }
 
-// Load project habits.json on require
 loadHabitsConfig();
 
 function getHabits() {
@@ -161,10 +195,11 @@ function todayAt(hour, minute, day = new Date()) {
 
 /**
  * Next habit that still needs its once-daily remind (not done, not yet reminded today).
- * Overdue habits fire once soon after launch, then wait until tomorrow unless done via tray.
+ * Overdue weekday habits fire once soon after launch; weekend slots wait until Monday.
  */
 function nextHabitDue(state, dayKey, now = Date.now()) {
   const today = dayKey(now);
+  const dow = new Date(now).getDay();
   let soonest = null;
   let habit = null;
   let overdue = false;
@@ -173,6 +208,8 @@ function nextHabitDue(state, dayKey, now = Date.now()) {
     if (!state.enabled[h.id]) return;
     if (state.done[h.id] === today) return;
     if (state.reminded[h.id] === today) return;
+    const days = Array.isArray(h.days) && h.days.length ? h.days : WEEKDAYS;
+    if (!days.includes(dow)) return;
 
     let at = todayAt(h.hour, h.minute, new Date(now));
     let isOverdue = false;
@@ -192,7 +229,7 @@ function nextHabitDue(state, dayKey, now = Date.now()) {
     overdue = false;
     HABITS.forEach((h) => {
       if (!state.enabled[h.id]) return;
-      const at = todayAt(h.hour, h.minute, new Date(now)) + 24 * 60 * 60 * 1000;
+      const at = nextFutureSlot(h, now);
       if (soonest == null || at < soonest) {
         soonest = at;
         habit = h;
@@ -205,10 +242,13 @@ function nextHabitDue(state, dayKey, now = Date.now()) {
 
 function habitsDoneCount(state, dayKey, now = Date.now()) {
   const today = dayKey(now);
+  const dow = new Date(now).getDay();
   let done = 0;
   let total = 0;
   for (const h of HABITS) {
     if (!state.enabled[h.id]) continue;
+    const days = Array.isArray(h.days) && h.days.length ? h.days : WEEKDAYS;
+    if (!days.includes(dow)) continue;
     total += 1;
     if (state.done[h.id] === today) done += 1;
   }
@@ -227,4 +267,6 @@ module.exports = {
   nextHabitDue,
   habitsDoneCount,
   todayAt,
+  nextFutureSlot,
+  normalizeDays,
 };

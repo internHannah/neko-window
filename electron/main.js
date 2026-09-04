@@ -69,6 +69,9 @@ let habitState = defaultHabitState();
 let habitTimer = null;
 let nextHabitAt = 0;
 let pendingHabitId = null;
+let habitsConfigPath = null;
+let habitsWatcher = null;
+let habitsReloadTimer = null;
 
 function defaultSettings() {
   return {
@@ -699,7 +702,7 @@ function triggerHabitReminder(habit, { fromTray = false, reopen = false, openSit
   pendingHabitId = habit.id;
   saveSettings();
 
-  const shouldOpen = reopen || fromTray || openSite;
+  const shouldOpen = reopen || fromTray || (openSite && !isQuietHourNow());
   const opener = shouldOpen ? openHabitSite(habit) : Promise.resolve(false);
   opener.then((opened) => {
     sendToNeko("neko:habit", {
@@ -737,6 +740,64 @@ function setHabitEnabled(id, enabled) {
   saveSettings();
   scheduleHabits();
   buildTrayMenu();
+}
+
+function resolveHabitsPath() {
+  const userFile = path.join(app.getPath("userData"), "habits.json");
+  const projectFile = path.join(__dirname, "..", "habits.json");
+  if (!fs.existsSync(userFile) && fs.existsSync(projectFile)) {
+    try {
+      fs.copyFileSync(projectFile, userFile);
+    } catch (err) {
+      console.error("[doraemon] Failed to copy habits.json:", err.message);
+      return projectFile;
+    }
+  }
+  return fs.existsSync(userFile) ? userFile : projectFile;
+}
+
+function stopHabitsWatcher() {
+  if (habitsReloadTimer) {
+    clearTimeout(habitsReloadTimer);
+    habitsReloadTimer = null;
+  }
+  if (habitsWatcher) {
+    habitsWatcher.close();
+    habitsWatcher = null;
+  }
+}
+
+function watchHabitsConfig(file) {
+  stopHabitsWatcher();
+  habitsConfigPath = file;
+  if (!file) return;
+  try {
+    habitsWatcher = fs.watch(file, () => {
+      if (habitsReloadTimer) clearTimeout(habitsReloadTimer);
+      habitsReloadTimer = setTimeout(() => reloadHabitsConfig(), 400);
+    });
+  } catch (err) {
+    console.error("[doraemon] Failed to watch habits.json:", err.message);
+  }
+}
+
+function reloadHabitsConfig() {
+  const loaded = loadHabitsConfig(
+    [habitsConfigPath, path.join(app.getPath("userData"), "habits.json"), path.join(__dirname, "..", "habits.json")].filter(
+      Boolean
+    )
+  );
+  habitState = normalizeHabitState(habitState);
+  watchHabitsConfig(loaded);
+  scheduleHabits();
+  buildTrayMenu();
+}
+
+function editHabitsConfig() {
+  const target = habitsConfigPath || resolveHabitsPath();
+  shell.openPath(target).catch((err) => {
+    console.error("[doraemon] Failed to open habits.json:", err.message);
+  });
 }
 
 function scheduleHabits() {
@@ -862,6 +923,11 @@ function buildTrayMenu() {
           checked: habitState.enabled[h.id],
           click: (item) => setHabitEnabled(h.id, item.checked),
         })),
+        { type: "separator" },
+        {
+          label: "Edit habits.json",
+          click: () => editHabitsConfig(),
+        },
       ],
     },
     { type: "separator" },
@@ -1043,10 +1109,8 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     settingsPath = path.join(app.getPath("userData"), "settings.json");
-    loadHabitsConfig([
-      path.join(app.getPath("userData"), "habits.json"),
-      path.join(__dirname, "..", "habits.json"),
-    ]);
+    const loadedHabits = loadHabitsConfig([resolveHabitsPath()]);
+    watchHabitsConfig(loadedHabits);
     const settings = loadSettings();
     reminderIntervalMs = settings.reminderMinutes * 60 * 1000;
     muted = settings.muted;
@@ -1092,26 +1156,26 @@ if (!gotLock) {
     powerMonitor.on("suspend", () => {
       suspended = true;
       clearReminderTimer();
-    clearHabitTimer();
+      clearHabitTimer();
     });
     powerMonitor.on("resume", () => {
       suspended = false;
       if (!paused) {
-      scheduleReminders(Math.min(reminderIntervalMs, 60_000));
-      scheduleHabits();
-    }
+        scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+        scheduleHabits();
+      }
     });
     powerMonitor.on("lock-screen", () => {
       suspended = true;
       clearReminderTimer();
-    clearHabitTimer();
+      clearHabitTimer();
     });
     powerMonitor.on("unlock-screen", () => {
       suspended = false;
       if (!paused) {
-      scheduleReminders(Math.min(reminderIntervalMs, 60_000));
-      scheduleHabits();
-    }
+        scheduleReminders(Math.min(reminderIntervalMs, 60_000));
+        scheduleHabits();
+      }
     });
 
     screen.on("display-metrics-changed", fitWindowToDisplay);
@@ -1131,6 +1195,7 @@ if (!gotLock) {
     saveSettings();
     clearReminderTimer();
     clearHabitTimer();
+    stopHabitsWatcher();
     stopCursorPoll();
     if (tooltipTimer) {
       clearInterval(tooltipTimer);
